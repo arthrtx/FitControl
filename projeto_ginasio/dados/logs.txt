@@ -1,0 +1,18 @@
+15/07/2026 18:53:27 - Aluno 'arthur' registado.
+15/07/2026 19:08:01 - Aluno 'arthur' registado.
+15/07/2026 19:11:45 - Aluno 'arthur' registado.
+15/07/2026 19:14:27 - Aluno 'arthur' movido para arquivo de exclusão.
+15/07/2026 19:14:30 - Aluno 'arthur' movido para arquivo de exclusão.
+15/07/2026 19:14:32 - Aluno 'arthur' editado.
+15/07/2026 19:14:44 - Aluno 'arthur' editado.
+15/07/2026 19:14:57 - Aluno 'arthur' editado.
+15/07/2026 19:15:03 - Aluno 'arthur' movido para arquivo de exclusão.
+16/07/2026 14:44:02 - Aluno 'arthur sal' registado.
+16/07/2026 14:44:08 - Aluno 'arthur sal' editado.
+16/07/2026 14:44:13 - Aluno 'arthur sal' movido para arquivo de exclusão.
+16/07/2026 15:01:53 - Aluno 'arthur sal' registado.
+16/07/2026 16:35:02 - Pagamento registado para o aluno 'arthur sal'.
+16/07/2026 16:35:27 - Entrada do aluno 'arthur sal'.
+16/07/2026 16:42:31 - Aluno 'laura novaes' registado.
+16/07/2026 16:42:50 - Pagamento registado para o aluno 'laura novaes'.
+16/07/2026 16:43:01 - Entrada do aluno 'laura novaes'.

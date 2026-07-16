@@ -1,0 +1,38 @@
+[
+    {
+        "id": 1,
+        "nome": "arthur",
+        "telemovel": "123123",
+        "documento": "123123",
+        "plano": "Anual",
+        "foto": "sem_foto",
+        "data_exclusao": "15/07/2026"
+    },
+    {
+        "id": 2,
+        "nome": "arthur",
+        "telemovel": "123123",
+        "documento": "123123123",
+        "plano": "Anual",
+        "foto": "sem_foto",
+        "data_exclusao": "15/07/2026"
+    },
+    {
+        "id": 3,
+        "nome": "arthur",
+        "telemovel": "p",
+        "documento": "123132",
+        "plano": "Diário",
+        "foto": "sem_foto",
+        "data_exclusao": "15/07/2026"
+    },
+    {
+        "id": 1,
+        "nome": "arthur sal",
+        "telemovel": "929067351",
+        "documento": "123123123",
+        "plano": "Mensal",
+        "foto": "sem_foto",
+        "data_exclusao": "16/07/2026"
+    }
+]

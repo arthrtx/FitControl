@@ -1,0 +1,18 @@
+[
+    {
+        "id_aluno": 1,
+        "plano": "Trimestral",
+        "valor": 50.0,
+        "data_pagamento": "16/07/2026",
+        "data_vencimento": "14/10/2026",
+        "estado": "Pago"
+    },
+    {
+        "id_aluno": 2,
+        "plano": "Anual",
+        "valor": 100.0,
+        "data_pagamento": "16/07/2026",
+        "data_vencimento": "16/07/2027",
+        "estado": "Pago"
+    }
+]
