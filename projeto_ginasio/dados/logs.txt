@@ -16,3 +16,25 @@
 16/07/2026 16:42:31 - Aluno 'laura novaes' registado.
 16/07/2026 16:42:50 - Pagamento registado para o aluno 'laura novaes'.
 16/07/2026 16:43:01 - Entrada do aluno 'laura novaes'.
+20/07/2026 17:49:33 - Aluno 'arthur sal' movido para arquivo de exclusão.
+20/07/2026 17:49:38 - Aluno 'laura novaes' movido para arquivo de exclusão.
+22/07/2026 14:29:01 - Funcionário 'arthur' criado.
+22/07/2026 14:29:12 - Funcionário 'laura' criado.
+22/07/2026 14:38:16 - Funcionário 'arthur' criado.
+22/07/2026 14:41:26 - Funcionário 'arthur' criado.
+22/07/2026 14:41:37 - Funcionário 'arthur' editado.
+22/07/2026 14:43:51 - Funcionário 'arthur' criado.
+22/07/2026 15:22:22 - Funcionário 'arthur' editado.
+22/07/2026 15:30:13 - [AUTENTICACAO] Login: th
+22/07/2026 16:03:26 - [AUTENTICACAO] Login: th
+22/07/2026 16:07:49 - Funcionário 'arthur' eliminado.
+22/07/2026 16:24:20 - [AUTENTICACAO] Login inválido: admin
+22/07/2026 16:24:28 - [AUTENTICACAO] Login inválido: adm
+22/07/2026 16:24:31 - [AUTENTICACAO] Login inválido: adm
+22/07/2026 16:30:17 - [AUTENTICACAO] Login inválido: admin
+22/07/2026 16:35:22 - [AUTENTICACAO] Login inválido: admin
+22/07/2026 16:42:34 - [AUTENTICACAO] Login: adm
+22/07/2026 16:43:36 - [AUTENTICACAO] Login: adm
+22/07/2026 16:49:05 - [AUTENTICACAO] Login: adm
+22/07/2026 16:50:34 - [AUTENTICACAO] Login: adm
+22/07/2026 17:09:54 - [AUTENTICACAO] Login: adm

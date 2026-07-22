@@ -43,7 +43,7 @@ def ligarCam():
     cv.destroyAllWindows()
 
 
-def tirarFoto(username):
+def tirarFoto(usuario):
     print("tirarFoto chamada")
     pasta = r"C:\Temp\MinhaPasta\faces"
     os.makedirs(pasta, exist_ok=True)
@@ -70,7 +70,7 @@ def tirarFoto(username):
         key = cv.waitKey(1) & 0xFF
 
         if key == ord('p') or key == ord('P'):
-            caminho = os.path.join(pasta, f"{username}.jpg")
+            caminho = os.path.join(pasta, f"{usuario}.jpg")
 
             if cv.imwrite(caminho, frame):
                 print("Foto guardada com sucesso!")

@@ -1,10 +1,12 @@
 """Ponto de entrada da interface gráfica."""
 
-from interface_grafica.app import AcademiaApp
+from interface_grafica.login import LoginWindow
 
 
 def main():
-    app = AcademiaApp()
+
+    app = LoginWindow()
+
     app.mainloop()
 
 

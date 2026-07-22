@@ -1,18 +1,1 @@
-[
-    {
-        "id": 1,
-        "nome": "arthur sal",
-        "telemovel": "929067351",
-        "documento": "123123123",
-        "plano": "Trimestral",
-        "foto": "sem_foto"
-    },
-    {
-        "id": 2,
-        "nome": "laura novaes",
-        "telemovel": "929067351",
-        "documento": "132132132",
-        "plano": "Anual",
-        "foto": "C:\\Temp\\MinhaPasta\\faces\\2.jpg"
-    }
-]
+[]

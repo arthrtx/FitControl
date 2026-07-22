@@ -8,20 +8,22 @@ from tkinter import messagebox, ttk
 import customtkinter as ctk
 
 from interface_grafica.constants import CORES
-from interface_grafica.dialogs import AlunoFormDialog
+from interface_grafica.dialogs import AlunoFormDialog, FuncionarioFormDialog
 from interface_grafica.utils import aluno_por_id, nome_aluno, setup_paths
 
 setup_paths()
 
 from projeto_ginasio.main import inicializar
 from projeto_ginasio.Camara import gravarVideo, ligarCam
-from modulos import estatistica, gestao_alunos, pagamentos, presencas
+from modulos import( estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios)
 
 
 class AcademiaApp(ctk.CTk):
     """Janela principal da aplicação."""
 
-    def __init__(self):
+    def __init__(self, utilizador):
+        self.utilizador = utilizador
+        self.admin = self.utilizador["tipo"] == "Administrador"
         super().__init__()
 
         ctk.set_appearance_mode("dark")
@@ -52,18 +54,37 @@ class AcademiaApp(ctk.CTk):
             self.sidebar,
             text="🏋️ Academia",
             font=ctk.CTkFont(size=22, weight="bold"),
-        ).grid(row=0, column=0, padx=20, pady=(25, 30), sticky="w")
+        ).grid(row=0, column=0, padx=20, pady=(25, 10), sticky="w")
 
+        ctk.CTkLabel(
+            self.sidebar,
+            text=self.utilizador["nome"],
+            font=ctk.CTkFont(size=15, weight="bold"),
+        ).grid(row=1, column=0, padx=20, sticky="w")
+
+        ctk.CTkLabel(
+            self.sidebar,
+            text=self.utilizador["tipo"],
+            text_color="gray",
+            font=ctk.CTkFont(size=12),
+        ).grid(row=2, column=0, padx=20, pady=(0, 20), sticky="w")
+       
         nav_items = [
             ("dashboard", "📊 Dashboard"),
             ("alunos", "👥 Alunos"),
-            ("excluidos", "🗂️ Arquivo"),
+        ]
+
+        if self.admin:
+            nav_items.append(("funcionarios", "👨‍💼 Funcionários"))
+            nav_items.append(("excluidos", "🗂️ Arquivo"))
+
+        nav_items.extend([
             ("pagamentos", "💳 Pagamentos"),
             ("presencas", "✅ Presenças"),
             ("camera", "📷 Câmara"),
-        ]
+        ])
 
-        for i, (chave, texto) in enumerate(nav_items, start=1):
+        for i, (chave, texto) in enumerate(nav_items, start=3):
             btn = ctk.CTkButton(
                 self.sidebar,
                 text=texto,
@@ -91,11 +112,14 @@ class AcademiaApp(ctk.CTk):
         self.paginas = {
             "dashboard": self._criar_dashboard(),
             "alunos": self._criar_alunos(),
-            "excluidos": self._criar_excluidos(),
             "pagamentos": self._criar_pagamentos(),
             "presencas": self._criar_presencas(),
+            "funcionarios": self._criar_funcionarios(),
             "camera": self._criar_camera(),
         }
+
+        if self.admin:
+            self.paginas["excluidos"] = self._criar_excluidos()
 
     def _configurar_treeview(self):
         style = ttk.Style()
@@ -130,6 +154,8 @@ class AcademiaApp(ctk.CTk):
             else:
                 btn.configure(fg_color="transparent")
 
+        if nome == "excluidos" and not self.admin:
+            return
         self.paginas[nome].grid(row=0, column=0, sticky="nsew")
         self._pagina_atual = nome
 
@@ -143,10 +169,12 @@ class AcademiaApp(ctk.CTk):
             self._atualizar_pagamentos()
         elif nome == "presencas":
             self._atualizar_presencas()
+        elif nome == "funcionarios":
+            self._atualizar_funcionarios()
 
     def _criar_dashboard(self):
         frame = ctk.CTkFrame(self.content, fg_color="transparent")
-        frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        frame.grid_columnconfigure((0, 1, 2, 3, 4, 5, 6), weight=1)
 
         header = ctk.CTkFrame(frame, fg_color="transparent")
         header.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 15))
@@ -158,27 +186,66 @@ class AcademiaApp(ctk.CTk):
         ).pack(side="right")
 
         self.cards = {}
-        card_defs = [
-            ("total_alunos", "Total Alunos", CORES["accent"]),
-            ("mensalidades_validas", "Mensalidades OK", CORES["success"]),
-            ("mensalidades_atrasadas", "Em Atraso", CORES["danger"]),
-            ("presencas_hoje", "Presenças Hoje", CORES["warning"]),
-        ]
+        if self.admin:
+            card_defs = [
+                ("total_alunos", "Total Alunos", CORES["accent"]),
+                ("funcionarios_registados", "Funcionários", "#3498db"),
+                ("receita_total", "Receita Total (€)", "#27ae60"),
+                ("receita_mes", "Receita do Mês (€)", "#8e44ad"),
+                ("mensalidades_validas", "Mensalidades OK", CORES["success"]),
+                ("mensalidades_atrasadas", "Em Atraso", CORES["danger"]),
+                ("presencas_hoje", "Presenças Hoje", CORES["warning"]),
+            ]
+
+        else:
+
+            card_defs = [
+                ("total_alunos", "Total Alunos", CORES["accent"]),
+                ("mensalidades_validas", "Mensalidades OK", CORES["success"]),
+                ("mensalidades_atrasadas", "Em Atraso", CORES["danger"]),
+                ("presencas_hoje", "Presenças Hoje", CORES["warning"]),
+            ]
 
         for i, (chave, titulo, cor) in enumerate(card_defs):
+
+            if self.admin:
+                # 4 cards na primeira linha e 3 na segunda
+                linha = 1 if i < 4 else 2
+                coluna = i if i < 4 else i - 4
+            else:
+                # Funcionário: todos na primeira linha
+                linha = 1
+                coluna = i
+
             card = ctk.CTkFrame(frame, fg_color=CORES["card"], corner_radius=12)
-            card.grid(row=1, column=i, padx=8, pady=8, sticky="nsew")
-            ctk.CTkLabel(card, text=titulo, font=ctk.CTkFont(size=13)).pack(
-                padx=15, pady=(15, 5), anchor="w"
+
+            card.grid(
+                row=linha,
+                column=coluna,
+                padx=8,
+                pady=8,
+                sticky="nsew",
             )
+
+            ctk.CTkLabel(
+                card,
+                text=titulo,
+                font=ctk.CTkFont(size=13)
+            ).pack(padx=15, pady=(15, 5), anchor="w")
+
             valor = ctk.CTkLabel(
-                card, text="—", font=ctk.CTkFont(size=36, weight="bold"), text_color=cor
+                card,
+                text="—",
+                font=ctk.CTkFont(size=36, weight="bold"),
+                text_color=cor
             )
+
             valor.pack(padx=15, pady=(0, 15), anchor="w")
+
             self.cards[chave] = valor
 
         planos_frame = ctk.CTkFrame(frame, fg_color=CORES["card"], corner_radius=12)
-        planos_frame.grid(row=2, column=0, columnspan=2, padx=8, pady=8, sticky="nsew")
+        planos_frame.grid(row=3, column=0, columnspan=2, padx=8, pady=8, sticky="nsew")
         ctk.CTkLabel(
             planos_frame, text="Alunos por Plano", font=ctk.CTkFont(size=16, weight="bold")
         ).pack(padx=15, pady=(15, 10), anchor="w")
@@ -193,14 +260,16 @@ class AcademiaApp(ctk.CTk):
             self.planos_labels[plano] = lbl
 
         resumo_frame = ctk.CTkFrame(frame, fg_color=CORES["card"], corner_radius=12)
-        resumo_frame.grid(row=2, column=2, columnspan=2, padx=8, pady=8, sticky="nsew")
+        resumo_frame.grid(row=3, column=2, columnspan=2, padx=8, pady=8, sticky="nsew")
         ctk.CTkLabel(
             resumo_frame, text="Resumo Geral", font=ctk.CTkFont(size=16, weight="bold")
         ).pack(padx=15, pady=(15, 10), anchor="w")
         self.resumo_labels = {}
         for chave, titulo in [
-            ("total_presencas", "Total de presenças registadas"),
+            ("total_presencas", "Total de presenças"),
             ("presencas_hoje", "Presenças hoje"),
+            ("funcionario", "Funcionário autenticado"),
+            ("cargo", "Cargo"),
         ]:
             row = ctk.CTkFrame(resumo_frame, fg_color="transparent")
             row.pack(fill="x", padx=15, pady=4)
@@ -218,7 +287,15 @@ class AcademiaApp(ctk.CTk):
         for chave, lbl in self.planos_labels.items():
             lbl.configure(text=str(stats.get(chave, 0)))
         for chave, lbl in self.resumo_labels.items():
-            lbl.configure(text=str(stats.get(chave, 0)))
+
+            if chave == "funcionario":
+                lbl.configure(text=self.utilizador["nome"])
+
+            elif chave == "cargo":
+                lbl.configure(text=self.utilizador["tipo"])
+
+            else:
+                lbl.configure(text=str(stats.get(chave, 0)))
 
     def _criar_alunos(self):
         frame = ctk.CTkFrame(self.content, fg_color="transparent")
@@ -233,19 +310,23 @@ class AcademiaApp(ctk.CTk):
 
         btn_frame = ctk.CTkFrame(header, fg_color="transparent")
         btn_frame.pack(side="right")
+        
         ctk.CTkButton(btn_frame, text="+ Novo Aluno", command=self._novo_aluno).pack(
             side="left", padx=4
         )
+
         ctk.CTkButton(btn_frame, text="Editar", command=self._editar_aluno).pack(
             side="left", padx=4
         )
-        ctk.CTkButton(
-            btn_frame,
-            text="Eliminar",
-            fg_color=CORES["danger"],
-            hover_color="#c0392b",
-            command=self._eliminar_aluno,
-        ).pack(side="left", padx=4)
+        if self.admin:
+            ctk.CTkButton(
+                btn_frame,
+                text="Eliminar",
+                fg_color=CORES["danger"],
+                hover_color="#c0392b",
+                command=self._eliminar_aluno,
+            ).pack(side="left", padx=4)
+                
         ctk.CTkButton(btn_frame, text="Atualizar", command=self._atualizar_lista_alunos).pack(
             side="left", padx=4
         )
@@ -287,6 +368,277 @@ class AcademiaApp(ctk.CTk):
         scroll.grid(row=0, column=1, sticky="ns", pady=10, padx=(0, 10))
 
         return frame
+    
+    def _criar_funcionarios(self):
+
+        frame = ctk.CTkFrame(
+            self.content,
+            fg_color="transparent"
+        )
+
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
+
+        # Cabeçalho
+        header = ctk.CTkFrame(
+            frame,
+            fg_color="transparent"
+        )
+
+        header.grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            pady=(0,10)
+        )
+
+        ctk.CTkLabel(
+            header,
+            text="Gestão de Funcionários",
+            font=ctk.CTkFont(
+                size=28,
+                weight="bold"
+            )
+        ).pack(side="left")
+
+        btn_frame = ctk.CTkFrame(header, fg_color="transparent")
+        btn_frame.pack(side="right")
+
+        ctk.CTkButton(
+            btn_frame,
+            text="+ Novo Funcionário",
+            command=self._novo_funcionario
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Editar",
+            command=self._editar_funcionario
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Eliminar",
+            fg_color=CORES["danger"],
+            hover_color="#c0392b",
+            command=self._eliminar_funcionario
+        ).pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            btn_frame,
+            text="Atualizar",
+            command=self._atualizar_funcionarios
+        ).pack(side="left", padx=4)
+
+        # Tabela
+
+        table_frame = ctk.CTkFrame(frame)
+
+        table_frame.grid(
+            row=1,
+            column=0,
+            sticky="nsew"
+        )
+
+        table_frame.grid_columnconfigure(0, weight=1)
+        table_frame.grid_rowconfigure(0, weight=1)
+
+        cols = (
+            "id",
+            "nome",
+            "usuario",
+            "tipo"
+        )
+
+        self.tree_funcionarios = ttk.Treeview(
+            table_frame,
+            columns=cols,
+            show="headings",
+            style="Academia.Treeview"
+        )
+
+        headings = {
+            "id": "ID",
+            "nome": "Nome",
+            "usuario": "Utilizador",
+            "tipo": "Cargo",
+        }
+
+        widths = {
+            "id": 60,
+            "nome": 250,
+            "usuario": 220,
+            "tipo": 150,
+        }
+
+        for col in cols:
+
+            self.tree_funcionarios.heading(
+                col,
+                text=headings[col]
+            )
+
+            self.tree_funcionarios.column(
+                col,
+                width=widths[col],
+                anchor="center" if col == "id" else "w"
+            )
+
+        scroll = ctk.CTkScrollbar(
+            table_frame,
+            command=self.tree_funcionarios.yview
+        )
+
+        self.tree_funcionarios.configure(
+            yscrollcommand=scroll.set
+        )
+
+        self.tree_funcionarios.grid(
+            row=0,
+            column=0,
+            sticky="nsew",
+            padx=(10,0),
+            pady=10
+        )
+
+        scroll.grid(
+            row=0,
+            column=1,
+            sticky="ns",
+            padx=(0,10),
+            pady=10
+        )
+
+        return frame
+
+    def _funcionario_selecionado(self):
+
+        selecao = self.tree_funcionarios.selection()
+
+        if not selecao:
+            messagebox.showinfo(
+                "Seleção",
+                "Selecione um funcionário."
+            )
+            return None
+
+        id_funcionario = int(selecao[0])
+
+        for funcionario in gestao_funcionarios.listar_funcionarios():
+
+            if funcionario["id"] == id_funcionario:
+                return funcionario
+
+            return None
+
+    def _novo_funcionario(self):
+
+        def callback(nome, usuario, senha, tipo):
+
+            ok = gestao_funcionarios.criar_funcionario(
+                nome,
+                usuario,
+                senha,
+                tipo
+            )
+
+            if ok:
+
+                messagebox.showinfo(
+                    "Sucesso",
+                    f"Funcionário '{nome}' criado com sucesso."
+                )
+
+                self._atualizar_funcionarios()
+
+            else:
+
+                messagebox.showerror(
+                    "Erro",
+                    "Não foi possível criar o funcionário.\n"
+                    "Verifique se o utilizador já existe."
+                )
+
+        FuncionarioFormDialog(
+            self,
+            callback
+    )
+    def _editar_funcionario(self):
+
+        funcionario = self._funcionario_selecionado()
+
+        if funcionario is None:
+            return
+
+        def callback(nome, usuario, senha, tipo):
+
+            ok = gestao_funcionarios.editar_funcionario(
+                funcionario["id"],
+                nome,
+                usuario,
+                senha,
+                tipo
+            )
+
+            if ok:
+
+                messagebox.showinfo(
+                    "Sucesso",
+                    "Funcionário atualizado com sucesso."
+                )
+
+                self._atualizar_funcionarios()
+
+            else:
+
+                messagebox.showerror(
+                    "Erro",
+                    "Não foi possível atualizar o funcionário."
+                )
+
+        FuncionarioFormDialog(
+            self,
+            callback,
+            funcionario
+        )
+
+    def _eliminar_funcionario(self):
+
+        funcionario = self._funcionario_selecionado()
+
+        if funcionario is None:
+            return
+
+        if funcionario["usuario"] == self.utilizador["usuario"]:
+            messagebox.showwarning(
+                "Aviso",
+                "Não pode eliminar o utilizador com a sessão iniciada."
+            )
+            return
+
+        confirmar = messagebox.askyesno(
+            "Confirmar",
+            f"Eliminar o funcionário '{funcionario['nome']}'?"
+        )
+
+        if not confirmar:
+            return
+
+        if gestao_funcionarios.eliminar_funcionario(funcionario["id"]):
+
+            messagebox.showinfo(
+                "Sucesso",
+                "Funcionário eliminado com sucesso."
+            )
+
+            self._atualizar_funcionarios()
+
+        else:
+
+            messagebox.showerror(
+                "Erro",
+                "Não foi possível eliminar o funcionário."
+            )
 
     def _atualizar_lista_alunos(self):
         for item in self.tree_alunos.get_children():
@@ -308,6 +660,27 @@ class AcademiaApp(ctk.CTk):
                     estado,
                 ),
             )
+
+    def _atualizar_funcionarios(self):
+
+        # Limpa a tabela
+        for item in self.tree_funcionarios.get_children():
+            self.tree_funcionarios.delete(item)
+
+        # Adiciona todos os funcionários
+        for funcionario in gestao_funcionarios.listar_funcionarios():
+
+            self.tree_funcionarios.insert(
+                "",
+                "end",
+                iid=str(funcionario["id"]),
+                values=(
+                    funcionario["id"],
+                    funcionario["nome"],
+                    funcionario["usuario"],
+                    funcionario["tipo"],
+                ),
+            )    
 
     def _aluno_selecionado(self):
         selecao = self.tree_alunos.selection()
@@ -357,6 +730,12 @@ class AcademiaApp(ctk.CTk):
         AlunoFormDialog(self, "Editar Aluno", callback, aluno=aluno)
 
     def _eliminar_aluno(self):
+        if not self.admin:
+            messagebox.showerror(
+                "Permissão",
+                "Apenas administradores podem eliminar alunos."
+            )
+            return
         id_aluno = self._aluno_selecionado()
         if id_aluno is None:
             return
@@ -449,6 +828,12 @@ class AcademiaApp(ctk.CTk):
             )
 
     def _restaurar_aluno(self):
+        if not self.admin:
+            messagebox.showerror(
+                "Permissão",
+                "Apenas administradores podem restaurar alunos."
+            )
+            return
         selecao = self.tree_excluidos.selection()
         if not selecao:
             messagebox.showinfo("Seleção", "Selecione um aluno para restaurar.")
