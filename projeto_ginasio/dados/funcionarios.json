@@ -1,5 +1,21 @@
 [
     {
+        "id": 3,
+        "nome": "laura",
+        "usuario": "ln",
+        "senha": "1234",
+        "tipo": "Funcionario",
+        "temporario": false
+    },
+    {
+        "id": 4,
+        "nome": "arthur",
+        "usuario": "th",
+        "senha": "1234",
+        "tipo": "Administrador",
+        "temporario": false
+    },
+    {
         "id": 1,
         "nome": "Administrador Temporário",
         "usuario": "adm",

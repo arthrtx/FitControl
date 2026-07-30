@@ -4,10 +4,55 @@ from tkinter import messagebox
 
 import customtkinter as ctk
 
-from interface_grafica.constants import PLANOS
+from interface_grafica.constants import PLANOS, TEMA
+from interface_grafica.widgets import (
+    btn_danger,
+    btn_primary,
+    btn_secondary,
+    centre_toplevel,
+    styled_entry,
+    styled_option,
+    SurfaceCard,
+)
 
 
-class AlunoFormDialog(ctk.CTkToplevel):
+class _FormDialogBase(ctk.CTkToplevel):
+    def _setup_window(self, master, titulo, largura, altura):
+        self.title(titulo)
+        self.geometry(f"{largura}x{altura}")
+        self.resizable(False, False)
+        self.configure(fg_color=TEMA["bg"])
+        self.grab_set()
+        self.focus_force()
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+
+        card = SurfaceCard(self)
+        card.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        card.grid_columnconfigure(1, weight=1)
+        return card
+
+    def _campo(self, card, linha, rotulo, widget):
+        ctk.CTkLabel(
+            card,
+            text=rotulo,
+            font=ctk.CTkFont(size=13),
+            text_color=TEMA["muted"],
+        ).grid(row=linha, column=0, padx=(16, 10), pady=10, sticky="e")
+        widget.grid(row=linha, column=1, padx=(0, 16), pady=10, sticky="ew")
+
+    def _botoes(self, card, linha, guardar_cmd):
+        barra = ctk.CTkFrame(card, fg_color="transparent")
+        barra.grid(row=linha, column=0, columnspan=2, pady=(8, 16))
+        btn_primary(barra, text="Guardar", width=120, command=guardar_cmd).pack(
+            side="left", padx=6
+        )
+        btn_secondary(barra, text="Cancelar", width=120, command=self.destroy).pack(
+            side="left", padx=6
+        )
+
+
+class AlunoFormDialog(_FormDialogBase):
     """Janela modal para criar ou editar um aluno."""
 
     def __init__(self, master, titulo, callback, aluno=None):
@@ -15,76 +60,45 @@ class AlunoFormDialog(ctk.CTkToplevel):
         self.callback = callback
         self.aluno = aluno
 
-        self.title(titulo)
-        self.geometry("480x420")
-        self.resizable(False, False)
-        self.grab_set()
-        self.focus_force()
+        card = self._setup_window(master, titulo, 500, 460)
 
-        self.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            card,
+            text=titulo,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=TEMA["text"],
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(16, 8))
 
-        campos = [
-            ("Nome", "nome"),
-            ("Telemóvel", "telemovel"),
-            ("Documento", "documento"),
-        ]
         self.entries = {}
-
-        for i, (label, chave) in enumerate(campos):
-            ctk.CTkLabel(self, text=label, font=ctk.CTkFont(size=14)).grid(
-                row=i, column=0, padx=(20, 10), pady=12, sticky="e"
-            )
-            entry = ctk.CTkEntry(self, width=280, height=36)
-            entry.grid(row=i, column=1, padx=(0, 20), pady=12, sticky="ew")
+        for i, (rotulo, chave) in enumerate(
+            [("Nome", "nome"), ("Telemóvel", "telemovel"), ("Documento", "documento")], start=1
+        ):
+            entry = styled_entry(card)
+            self._campo(card, i, rotulo, entry)
             self.entries[chave] = entry
 
-        ctk.CTkLabel(self, text="Plano", font=ctk.CTkFont(size=14)).grid(
-            row=3, column=0, padx=(20, 10), pady=12, sticky="e"
-        )
         self.plano_var = ctk.StringVar(value=PLANOS[1])
-        self.plano_menu = ctk.CTkOptionMenu(
-            self, values=PLANOS, variable=self.plano_var, width=280, height=36
-        )
-        self.plano_menu.grid(row=3, column=1, padx=(0, 20), pady=12, sticky="ew")
+        self.plano_menu = styled_option(card, values=PLANOS, variable=self.plano_var)
+        self._campo(card, 4, "Plano", self.plano_menu)
 
         if aluno:
             self.entries["nome"].insert(0, aluno["nome"])
             self.entries["telemovel"].insert(0, aluno["telemovel"])
             self.entries["documento"].insert(0, aluno["documento"])
             self.plano_var.set(aluno["plano"])
-            ctk.CTkLabel(
-                self,
-                text="(A foto não será alterada na edição)",
-                text_color="gray",
-                font=ctk.CTkFont(size=12),
-            ).grid(row=4, column=0, columnspan=2, pady=(0, 5))
+            aviso = "A foto não será alterada na edição."
         else:
-            ctk.CTkLabel(
-                self,
-                text="Ao guardar, a câmara abrirá para tirar a fotografia.",
-                text_color="gray",
-                font=ctk.CTkFont(size=12),
-            ).grid(row=4, column=0, columnspan=2, pady=(0, 5))
+            aviso = "Ao guardar, a câmara abrirá para tirar a fotografia."
 
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, columnspan=2, pady=20)
+        ctk.CTkLabel(
+            card,
+            text=aviso,
+            text_color=TEMA["muted"],
+            font=ctk.CTkFont(size=11),
+        ).grid(row=5, column=0, columnspan=2, padx=16, pady=(0, 4))
 
-        ctk.CTkButton(
-            btn_frame, text="Guardar", width=120, command=self._guardar
-        ).pack(side="left", padx=8)
-        ctk.CTkButton(
-            btn_frame,
-            text="Cancelar",
-            width=120,
-            fg_color="gray",
-            hover_color="#555",
-            command=self.destroy,
-        ).pack(side="left", padx=8)
-
-        self.update_idletasks()
-        x = master.winfo_x() + (master.winfo_width() - self.winfo_width()) // 2
-        y = master.winfo_y() + (master.winfo_height() - self.winfo_height()) // 2
-        self.geometry(f"+{x}+{y}")
+        self._botoes(card, 6, self._guardar)
+        centre_toplevel(self, master)
 
     def _guardar(self):
         nome = self.entries["nome"].get().strip()
@@ -99,185 +113,59 @@ class AlunoFormDialog(ctk.CTkToplevel):
         self.callback(nome, telemovel, documento, plano)
         self.destroy()
 
-class FuncionarioFormDialog(ctk.CTkToplevel):
-    """Janela para criar funcionários."""
+
+class FuncionarioFormDialog(_FormDialogBase):
+    """Janela para criar ou editar funcionários."""
 
     def __init__(self, master, callback, funcionario=None):
-        self.funcionario = funcionario
         super().__init__(master)
-
         self.callback = callback
+        self.funcionario = funcionario
 
-        if funcionario:
-            self.title("Editar Funcionário")
-        else:
-            self.title("Novo Funcionário")
-
-        self.geometry("480x380")
-        self.resizable(False, False)
-
-        self.grab_set()
-        self.focus_force()
-
-        self.grid_columnconfigure(1, weight=1)
-
-        campos = [
-            ("Nome", "nome"),
-            ("Utilizador", "usuario"),
-            ("Palavra-passe", "senha"),
-        ]
-
-        self.entries = {}
-
-        for i, (label, chave) in enumerate(campos):
-
-            ctk.CTkLabel(
-                self,
-                text=label,
-                font=ctk.CTkFont(size=14)
-            ).grid(
-                row=i,
-                column=0,
-                padx=(20,10),
-                pady=12,
-                sticky="e"
-            )
-
-            entry = ctk.CTkEntry(
-                self,
-                width=280,
-                height=36
-            )
-
-            entry.grid(
-                row=i,
-                column=1,
-                padx=(0,20),
-                pady=12,
-                sticky="ew"
-            )
-
-            self.entries[chave] = entry
+        titulo = "Editar Funcionário" if funcionario else "Novo Funcionário"
+        card = self._setup_window(master, titulo, 500, 420)
 
         ctk.CTkLabel(
-            self,
-            text="Cargo",
-            font=ctk.CTkFont(size=14)
-        ).grid(
-            row=3,
-            column=0,
-            padx=(20,10),
-            pady=12,
-            sticky="e"
-        )
+            card,
+            text=titulo,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=TEMA["text"],
+        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(16, 8))
+
+        self.entries = {}
+        for i, (rotulo, chave) in enumerate(
+            [("Nome", "nome"), ("Utilizador", "usuario"), ("Palavra-passe", "senha")], start=1
+        ):
+            entry = styled_entry(card)
+            self._campo(card, i, rotulo, entry)
+            self.entries[chave] = entry
 
         self.tipo_var = ctk.StringVar(value="Funcionario")
-
-        self.tipo_menu = ctk.CTkOptionMenu(
-            self,
-            values=[
-                "Funcionario",
-                "Administrador"
-            ],
+        self.tipo_menu = styled_option(
+            card,
+            values=["Funcionario", "Administrador"],
             variable=self.tipo_var,
-            width=280,
-            height=36
         )
+        self._campo(card, 4, "Cargo", self.tipo_menu)
 
-        self.tipo_menu.grid(
-            row=3,
-            column=1,
-            padx=(0,20),
-            pady=12,
-            sticky="ew"
-        )
         if funcionario:
-            self.entries["nome"].insert(
-                0,
-                funcionario["nome"]
-            )
+            self.entries["nome"].insert(0, funcionario["nome"])
+            self.entries["usuario"].insert(0, funcionario["usuario"])
+            self.entries["senha"].insert(0, funcionario["senha"])
+            self.tipo_var.set(funcionario["tipo"])
 
-            self.entries["usuario"].insert(
-                0,
-                funcionario["usuario"]
-            )
-
-            self.entries["senha"].insert(
-                0,
-                funcionario["senha"]
-            )
-
-            self.tipo_var.set(
-                funcionario["tipo"]
-            )
-
-        btn_frame = ctk.CTkFrame(
-            self,
-            fg_color="transparent"
-        )
-
-        btn_frame.grid(
-            row=4,
-            column=0,
-            columnspan=2,
-            pady=20
-        )
-
-        ctk.CTkButton(
-            btn_frame,
-            text="Guardar",
-            width=120,
-            command=self._guardar
-        ).pack(
-            side="left",
-            padx=8
-        )
-
-        ctk.CTkButton(
-            btn_frame,
-            text="Cancelar",
-            width=120,
-            fg_color="gray",
-            hover_color="#555",
-            command=self.destroy
-        ).pack(
-            side="left",
-            padx=8
-        )
-
-        self.update_idletasks()
-
-        x = master.winfo_x() + (
-            master.winfo_width() - self.winfo_width()
-        ) // 2
-
-        y = master.winfo_y() + (
-            master.winfo_height() - self.winfo_height()
-        ) // 2
-
-        self.geometry(f"+{x}+{y}")
+        self._botoes(card, 5, self._guardar)
+        centre_toplevel(self, master)
 
     def _guardar(self):
-
         nome = self.entries["nome"].get().strip()
         usuario = self.entries["usuario"].get().strip()
         senha = self.entries["senha"].get().strip()
         tipo = self.tipo_var.get()
 
         if not nome or not usuario or not senha:
-
-            messagebox.showwarning(
-                "Campos obrigatórios",
-                "Preencha todos os campos."
-            )
-
+            messagebox.showwarning("Campos obrigatórios", "Preencha todos os campos.")
             return
 
-        self.callback(
-            nome,
-            usuario,
-            senha,
-            tipo
-        )
-
+        self.callback(nome, usuario, senha, tipo)
         self.destroy()

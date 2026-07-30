@@ -2,10 +2,9 @@ import json
 import os
 import logging
 from datetime import datetime
+from projeto_ginasio.config import DADOS
 
-BASE_DIR = os.path.dirname(__file__)
-
-PASTA_DADOS = os.path.join(BASE_DIR, "dados")
+PASTA_DADOS = DADOS
 
 os.makedirs(PASTA_DADOS, exist_ok=True)
 

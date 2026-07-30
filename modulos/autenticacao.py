@@ -203,17 +203,20 @@ def autenticar(usuario, senha):
 
         registo = tentativas_falhadas[usuario.lower()]
 
-        segundos = int(
-            (
-                registo["bloqueado_ate"] -
-                datetime.now()
-            ).total_seconds()
+        segundos = max(
+            0,
+            int(
+                (
+                    registo["bloqueado_ate"] -
+                    datetime.now()
+                ).total_seconds()
+            )
         )
 
         return (
             False,
-            f"Utilizador bloqueado.\nTente novamente em {segundos} segundos.",
-            None
+            "BLOQUEADO",
+            segundos
         )
 
     utilizador = procurar_utilizador(usuario)

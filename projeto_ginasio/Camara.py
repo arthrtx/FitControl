@@ -1,146 +1,159 @@
 import cv2 as cv
 import os
 
-def ligarCam():
-    cap = cv.VideoCapture(0)
-
-    if not cap.isOpened():
-        print("Erro ao abrir a câmara.")
-        return
-
-    noir = False
-
-    while True:
-        ret, frame = cap.read()
-
-        if not ret:
-            print("Erro ao capturar imagem.")
-            break
-
-        if noir:
-            color = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        else:
-            color = frame
-
-        cv.imshow("Webcam", color)
-
-        key = cv.waitKey(1) & 0xFF
-
-        if key == ord('b'):
-            noir = True
-
-        elif key == ord('c'):
-            noir = False
-
-        elif key == ord('p'):
-            cv.imwrite("waka.jpg", frame)
-            print("Foto guardada!")
-
-        elif key == ord('q'):
-            break
-
-    cap.release()
-    cv.destroyAllWindows()
+from projeto_ginasio.config import (
+    PASTA_CAPTURAS,
+    PASTA_FACES,
+    PASTA_VIDEOS
+)
 
 
 def tirarFoto(usuario):
-    print("tirarFoto chamada")
-    pasta = r"C:\Temp\MinhaPasta\faces"
-    os.makedirs(pasta, exist_ok=True)
 
-    cap = cv.VideoCapture(0)
+    os.makedirs(
+        PASTA_FACES,
+        exist_ok=True
+    )
 
-    if not cap.isOpened():
-        print("Erro ao abrir a câmara.")
+    camera = cv.VideoCapture(0)
+
+    if not camera.isOpened():
+        print("Erro ao abrir camera")
         return None
 
-    print("====================================")
-    print("Prima P para tirar a fotografia.")
-    print("Prima Q para cancelar.")
-    print("====================================")
 
     while True:
-        ret, frame = cap.read()
 
-        if not ret:
+        sucesso, frame = camera.read()
+
+        if not sucesso:
             continue
 
-        cv.imshow("Webcam", frame)
 
-        key = cv.waitKey(1) & 0xFF
+        cv.imshow(
+            "Registar rosto",
+            frame
+        )
 
-        if key == ord('p') or key == ord('P'):
-            caminho = os.path.join(pasta, f"{usuario}.jpg")
 
-            if cv.imwrite(caminho, frame):
-                print("Foto guardada com sucesso!")
-                cap.release()
-                cv.destroyAllWindows()
-                return caminho
-            else:
-                print("Erro ao guardar a fotografia.")
-                cap.release()
-                cv.destroyAllWindows()
-                return None
+        tecla = cv.waitKey(1) & 0xff
 
-        elif key == ord('q') or key == ord('Q'):
-            print("Operação cancelada.")
-            cap.release()
+
+        if tecla == ord("p"):
+
+            caminho = os.path.join(
+                PASTA_FACES,
+                f"{usuario}.jpg"
+            )
+
+
+            cv.imwrite(
+                caminho,
+                frame
+            )
+
+
+            camera.release()
             cv.destroyAllWindows()
-            return None
+
+            return caminho
+
+
+
+        elif tecla == ord("q"):
+
+            break
+
+
+
+    camera.release()
+    cv.destroyAllWindows()
+
+    return None
+
+
+
+def ligarCam():
+
+    camera = cv.VideoCapture(0)
+
+
+    if not camera.isOpened():
+
+        print("Erro ao abrir camera")
+        return
+
+
+
+    while True:
+
+        sucesso, frame = camera.read()
+
+        if sucesso:
+
+            cv.imshow(
+                "Webcam",
+                frame
+            )
+
+
+        if cv.waitKey(1) & 0xff == ord("q"):
+
+            break
+
+
+
+    camera.release()
+    cv.destroyAllWindows()
+
 
 
 def gravarVideo():
-    cap = cv.VideoCapture(0)
 
-    if not cap.isOpened():
-        print("Erro ao abrir a câmara.")
-        return
+    camera = cv.VideoCapture(0)
 
-    frame_width = int(cap.get(cv.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv.CAP_PROP_FRAME_HEIGHT))
 
-    fourcc = cv.VideoWriter_fourcc(*'mp4v')
+    largura = int(
+        camera.get(cv.CAP_PROP_FRAME_WIDTH)
+    )
 
-    gravar = False
-    out = None
+    altura = int(
+        camera.get(cv.CAP_PROP_FRAME_HEIGHT)
+    )
+
+
+    caminho = os.path.join(
+        PASTA_VIDEOS,
+        "video.mp4"
+    )
+
+
+    out = cv.VideoWriter(
+        caminho,
+        cv.VideoWriter_fourcc(*"mp4v"),
+        20,
+        (largura, altura)
+    )
+
 
     while True:
-        ret, frame = cap.read()
 
-        if not ret:
-            print("Erro ao capturar imagem.")
-            break
+        sucesso, frame = camera.read()
 
-        cv.imshow("Camera", frame)
+        if sucesso:
 
-        key = cv.waitKey(1) & 0xFF
-
-        if key == ord('r') and not gravar:
-            out = cv.VideoWriter(
-                "output.mp4",
-                fourcc,
-                20.0,
-                (frame_width, frame_height)
-            )
-            gravar = True
-            print("A gravar...")
-
-        elif key == ord('s') and gravar:
-            gravar = False
-            out.release()
-            print("Gravação terminada.")
-
-        elif key == 27:
-            break
-
-        if gravar:
             out.write(frame)
 
-    cap.release()
+            cv.imshow(
+                "Gravar",
+                frame
+            )
 
-    if out is not None:
-        out.release()
 
+        if cv.waitKey(1) == 27:
+            break
+
+
+    camera.release()
+    out.release()
     cv.destroyAllWindows()
-

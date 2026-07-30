@@ -1,18 +1,18 @@
 [
     {
         "id_aluno": 1,
-        "plano": "Trimestral",
+        "plano": "Mensal",
         "valor": 50.0,
-        "data_pagamento": "16/07/2026",
-        "data_vencimento": "14/10/2026",
+        "data_pagamento": "29/07/2026",
+        "data_vencimento": "28/08/2026",
         "estado": "Pago"
     },
     {
-        "id_aluno": 2,
+        "id_aluno": 3,
         "plano": "Anual",
-        "valor": 100.0,
-        "data_pagamento": "16/07/2026",
-        "data_vencimento": "16/07/2027",
+        "valor": 500.0,
+        "data_pagamento": "29/07/2026",
+        "data_vencimento": "29/07/2027",
         "estado": "Pago"
     }
 ]

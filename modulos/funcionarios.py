@@ -239,6 +239,9 @@ def editar_funcionario(id_funcionario, nome, usuario, senha, tipo):
     for funcionario in funcionarios:
 
         if funcionario["id"] == id_funcionario:
+            print("ID recebido:", id_funcionario, type(id_funcionario))
+            print("ID guardado :", funcionario["id"], type(funcionario["id"]))
+            
 
             funcionario["nome"] = nome
             funcionario["usuario"] = usuario

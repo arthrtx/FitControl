@@ -2,9 +2,57 @@ import json
 import os
 from datetime import datetime, timedelta
 
+import cv2
+import numpy as np
+import insightface
+
 from projeto_ginasio.Camara import tirarFoto
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import alunos, alunos_excluidos
+
+def gerar_embedding(caminho_foto):
+
+    try:
+
+        ia = insightface.app.FaceAnalysis()
+
+        ia.prepare(
+            ctx_id=-1,
+            det_size=(320,320)
+        )
+
+
+        imagem = cv2.imread(caminho_foto)
+
+
+        if imagem is None:
+            return None
+
+
+        rostos = ia.get(imagem)
+
+
+        if len(rostos) == 0:
+            print("Nenhum rosto encontrado.")
+            return None
+
+
+        embedding = rostos[0].embedding
+
+
+        embedding = embedding / np.linalg.norm(embedding)
+
+
+        return embedding.tolist()
+
+
+    except Exception as erro:
+
+        print(
+            f"Erro ao gerar embedding: {erro}"
+        )
+
+        return None
 
 # inicialização
 # ======================================================
@@ -122,12 +170,27 @@ def criar_aluno(nome, telemovel, documento, plano):
 
 
     try:
+
         caminho_foto = tirarFoto(str(id_aluno))
+
+
     except Exception:
-        caminho_foto = ""
+
+        caminho_foto = None
+
+
 
     if not caminho_foto:
+
         caminho_foto = "sem_foto"
+        embedding = None
+
+
+    else:
+
+        embedding = gerar_embedding(
+            caminho_foto
+        )
 
     novo_aluno = {
         "id": id_aluno,
@@ -135,7 +198,8 @@ def criar_aluno(nome, telemovel, documento, plano):
         "telemovel": telemovel,
         "documento": documento,
         "plano": plano,
-        "foto": caminho_foto
+        "foto": caminho_foto,
+        "embedding": embedding
     }
 
 

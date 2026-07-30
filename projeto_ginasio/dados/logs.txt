@@ -1,40 +1,81 @@
-15/07/2026 18:53:27 - Aluno 'arthur' registado.
-15/07/2026 19:08:01 - Aluno 'arthur' registado.
-15/07/2026 19:11:45 - Aluno 'arthur' registado.
-15/07/2026 19:14:27 - Aluno 'arthur' movido para arquivo de exclusão.
-15/07/2026 19:14:30 - Aluno 'arthur' movido para arquivo de exclusão.
-15/07/2026 19:14:32 - Aluno 'arthur' editado.
-15/07/2026 19:14:44 - Aluno 'arthur' editado.
-15/07/2026 19:14:57 - Aluno 'arthur' editado.
-15/07/2026 19:15:03 - Aluno 'arthur' movido para arquivo de exclusão.
-16/07/2026 14:44:02 - Aluno 'arthur sal' registado.
-16/07/2026 14:44:08 - Aluno 'arthur sal' editado.
-16/07/2026 14:44:13 - Aluno 'arthur sal' movido para arquivo de exclusão.
-16/07/2026 15:01:53 - Aluno 'arthur sal' registado.
-16/07/2026 16:35:02 - Pagamento registado para o aluno 'arthur sal'.
-16/07/2026 16:35:27 - Entrada do aluno 'arthur sal'.
-16/07/2026 16:42:31 - Aluno 'laura novaes' registado.
-16/07/2026 16:42:50 - Pagamento registado para o aluno 'laura novaes'.
-16/07/2026 16:43:01 - Entrada do aluno 'laura novaes'.
-20/07/2026 17:49:33 - Aluno 'arthur sal' movido para arquivo de exclusão.
-20/07/2026 17:49:38 - Aluno 'laura novaes' movido para arquivo de exclusão.
-22/07/2026 14:29:01 - Funcionário 'arthur' criado.
-22/07/2026 14:29:12 - Funcionário 'laura' criado.
-22/07/2026 14:38:16 - Funcionário 'arthur' criado.
-22/07/2026 14:41:26 - Funcionário 'arthur' criado.
-22/07/2026 14:41:37 - Funcionário 'arthur' editado.
-22/07/2026 14:43:51 - Funcionário 'arthur' criado.
-22/07/2026 15:22:22 - Funcionário 'arthur' editado.
-22/07/2026 15:30:13 - [AUTENTICACAO] Login: th
-22/07/2026 16:03:26 - [AUTENTICACAO] Login: th
-22/07/2026 16:07:49 - Funcionário 'arthur' eliminado.
-22/07/2026 16:24:20 - [AUTENTICACAO] Login inválido: admin
-22/07/2026 16:24:28 - [AUTENTICACAO] Login inválido: adm
-22/07/2026 16:24:31 - [AUTENTICACAO] Login inválido: adm
-22/07/2026 16:30:17 - [AUTENTICACAO] Login inválido: admin
-22/07/2026 16:35:22 - [AUTENTICACAO] Login inválido: admin
-22/07/2026 16:42:34 - [AUTENTICACAO] Login: adm
-22/07/2026 16:43:36 - [AUTENTICACAO] Login: adm
-22/07/2026 16:49:05 - [AUTENTICACAO] Login: adm
-22/07/2026 16:50:34 - [AUTENTICACAO] Login: adm
-22/07/2026 17:09:54 - [AUTENTICACAO] Login: adm
+2026-07-29 15:31:57,431 - LOGIN - adm
+29/07/2026 15:31:57 - [AUTENTICACAO] Login: adm
+2026-07-29 15:50:49,188 - LOGIN - adm
+29/07/2026 15:50:49 - [AUTENTICACAO] Login: adm
+2026-07-29 16:44:55,683 - LOGIN - adm
+29/07/2026 16:44:55 - [AUTENTICACAO] Login: adm
+2026-07-29 16:45:33,361 - LOGIN - adm
+29/07/2026 16:45:33 - [AUTENTICACAO] Login: adm
+2026-07-29 16:47:07,574 - LOGIN - adm
+29/07/2026 16:47:07 - [AUTENTICACAO] Login: adm
+29/07/2026 17:20:13 - Aluno 'arthur sal' registado.
+2026-07-29 17:55:47,628 - LOGIN - adm
+29/07/2026 17:55:47 - [AUTENTICACAO] Login: adm
+29/07/2026 17:56:03 - Aluno 'arthur sal' movido para arquivo de exclusão.
+29/07/2026 17:56:50 - Aluno 'arthur sal' registado.
+29/07/2026 17:57:51 - Aluno 'arthur sal' editado.
+29/07/2026 17:58:32 - Aluno 'ar th' registado.
+29/07/2026 17:58:52 - Aluno 'ar th' movido para arquivo de exclusão.
+29/07/2026 17:58:55 - Aluno 'arthur sal' movido para arquivo de exclusão.
+2026-07-29 18:34:46,517 - LOGIN - adm
+29/07/2026 18:34:46 - [AUTENTICACAO] Login: adm
+2026-07-29 18:36:58,127 - LOGIN - adm
+29/07/2026 18:36:58 - [AUTENTICACAO] Login: adm
+2026-07-29 18:38:08,654 - LOGIN - adm
+29/07/2026 18:38:08 - [AUTENTICACAO] Login: adm
+2026-07-29 18:39:02,372 - LOGIN - adm
+29/07/2026 18:39:02 - [AUTENTICACAO] Login: adm
+2026-07-29 18:40:52,790 - LOGIN - adm
+29/07/2026 18:40:52 - [AUTENTICACAO] Login: adm
+2026-07-29 18:43:35,198 - LOGIN - adm
+29/07/2026 18:43:35 - [AUTENTICACAO] Login: adm
+2026-07-29 18:45:23,895 - LOGIN - adm
+29/07/2026 18:45:23 - [AUTENTICACAO] Login: adm
+29/07/2026 18:46:36 - Aluno 'arthur sal' registado.
+2026-07-29 18:46:50,612 - LOGIN - adm
+29/07/2026 18:46:50 - [AUTENTICACAO] Login: adm
+29/07/2026 18:46:56 - Entrada do aluno 'arthur sal'.
+2026-07-29 18:50:29,067 - LOGIN - adm
+29/07/2026 18:50:29 - [AUTENTICACAO] Login: adm
+2026-07-29 18:55:06,507 - LOGIN - adm
+29/07/2026 18:55:06 - [AUTENTICACAO] Login: adm
+2026-07-29 19:16:41,922 - LOGIN - adm
+29/07/2026 19:16:41 - [AUTENTICACAO] Login: adm
+29/07/2026 19:18:59 - Aluno 'marcelo moreno' registado.
+29/07/2026 19:19:11 - Entrada do aluno 'marcelo moreno'.
+29/07/2026 19:20:20 - Aluno 'marcos pinto' registado.
+29/07/2026 19:20:28 - Entrada do aluno 'marcos pinto'.
+29/07/2026 19:21:41 - Pagamento registado para o aluno 'arthur sal'.
+29/07/2026 19:21:58 - Pagamento registado para o aluno 'marcos pinto'.
+2026-07-30 14:06:29,883 - LOGIN - adm
+30/07/2026 14:06:29 - [AUTENTICACAO] Login: adm
+2026-07-30 14:13:39,152 - LOGIN - adm
+30/07/2026 14:13:39 - [AUTENTICACAO] Login: adm
+2026-07-30 14:14:55,831 - LOGIN - adm
+30/07/2026 14:14:55 - [AUTENTICACAO] Login: adm
+2026-07-30 14:35:57,938 - LOGIN - adm
+30/07/2026 14:35:57 - [AUTENTICACAO] Login: adm
+2026-07-30 14:42:52,821 - LOGIN - adm
+30/07/2026 14:42:52 - [AUTENTICACAO] Login: adm
+2026-07-30 14:45:14,459 - LOGIN - adm
+30/07/2026 14:45:14 - [AUTENTICACAO] Login: adm
+2026-07-30 14:45:44,461 - LOGIN - adm
+30/07/2026 14:45:44 - [AUTENTICACAO] Login: adm
+2026-07-30 14:47:37,418 - LOGIN - adm
+30/07/2026 14:47:37 - [AUTENTICACAO] Login: adm
+2026-07-30 14:51:42,512 - LOGIN - adm
+30/07/2026 14:51:42 - [AUTENTICACAO] Login: adm
+2026-07-30 14:54:14,118 - LOGIN - adm
+30/07/2026 14:54:14 - [AUTENTICACAO] Login: adm
+2026-07-30 14:55:55,630 - LOGIN - adm
+30/07/2026 14:55:55 - [AUTENTICACAO] Login: adm
+2026-07-30 14:56:57,113 - LOGIN - adm
+30/07/2026 14:56:57 - [AUTENTICACAO] Login: adm
+2026-07-30 15:11:51,928 - LOGIN - adm
+30/07/2026 15:11:51 - [AUTENTICACAO] Login: adm
+2026-07-30 15:29:26,096 - LOGIN - adm
+30/07/2026 15:29:26 - [AUTENTICACAO] Login: adm
+2026-07-30 15:30:06,670 - LOGIN - ln
+30/07/2026 15:30:06 - [AUTENTICACAO] Login: ln
+2026-07-30 15:55:17,069 - LOGIN - adm
+30/07/2026 15:55:17 - [AUTENTICACAO] Login: adm
