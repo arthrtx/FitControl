@@ -12,7 +12,7 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 - Dashboard com estatísticas e gráficos em tempo real.
 - Sistema de histórico e arquivo de dados.
 - Reconhecimento facial (Face ID) com modelo embutido (funciona offline).
-- Interface em modo claro e escuro.
+- 
 - Base de dados SQLite (auto-criada e vazia na primeira execução).
 
 ## Novidades desta versão (Edição Portátil)
