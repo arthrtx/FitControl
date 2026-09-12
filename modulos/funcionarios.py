@@ -1,9 +1,10 @@
-import json
-import os
 from datetime import datetime
 
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import funcionarios
+from projeto_ginasio.db_adapter import (
+    save_funcionarios, add_funcionario, update_funcionario, delete_funcionario, add_log
+)
 
 
 # ======================================================
@@ -18,14 +19,7 @@ def inicializar():
 # ======================================================
 def guardar_funcionarios():
     try:
-        with open(ARQUIVO_FUNCIONARIOS, "w", encoding="utf-8") as ficheiro:
-            json.dump(
-                funcionarios,
-                ficheiro,
-                indent=4,
-                ensure_ascii=False
-            )
-
+        save_funcionarios(funcionarios)
     except Exception as erro:
         raise Exception(f"Não foi possível guardar funcionários: {erro}")
 
@@ -34,77 +28,25 @@ def guardar_funcionarios():
 # carregar funcionários
 # ======================================================
 def carregar_funcionarios():
-
-    if not os.path.exists(ARQUIVO_FUNCIONARIOS):
-
-        funcionarios.clear()
-
+    # Dados agora são carregados do banco de dados em dados.py
+    if not funcionarios:
         funcionarios.append({
-
             "id": 1,
-
             "nome": "Administrador Temporário",
-
             "usuario": "adm",
-
             "senha": "adm",
-
             "tipo": "Administrador",
-
             "temporario": True
-
         })
-
         guardar_funcionarios()
-
-        return
-
-    try:
-        with open(ARQUIVO_FUNCIONARIOS, "r", encoding="utf-8") as ficheiro:
-            dados = json.load(ficheiro)
-
-            funcionarios.clear()
-            if isinstance(dados, list):
-                funcionarios.extend(dados)
-
-        if not funcionarios:
-
-            funcionarios.append({
-
-                "id": 1,
-
-                "nome": "Administrador Temporário",
-
-                "usuario": "adm",
-
-                "senha": "adm",
-
-                "tipo": "Administrador",
-
-                "temporario": True
-
-            })
-
-            guardar_funcionarios()
-
-    except Exception as erro:
-        raise Exception(f"Não foi possível carregar funcionários: {erro}")
 
 
 # ======================================================
 # logs
 # ======================================================
-def escrever_log(evento):
-
+def escrever_log(evento, tipo="funcionario"):
     try:
-        with open(ARQUIVO_LOG, "a", encoding="utf-8") as ficheiro:
-
-            data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-
-            ficheiro.write(
-                f"{data} - {evento}\n"
-            )
-
+        add_log(evento, tipo=tipo)
     except Exception as erro:
         raise Exception(f"Erro no log: {erro}")
 
@@ -186,9 +128,8 @@ def criar_funcionario(nome, usuario, senha, tipo):
     }
 
 
+    add_funcionario(novo_funcionario)
     funcionarios.append(novo_funcionario)
-
-    guardar_funcionarios()
 
     escrever_log(
         f"Funcionário '{nome}' criado."
@@ -250,7 +191,7 @@ def editar_funcionario(id_funcionario, nome, usuario, senha, tipo):
 
             funcionario["temporario"] = False
 
-            guardar_funcionarios()
+            update_funcionario(funcionario)
 
             escrever_log(
                 f"Funcionário '{nome}' editado."
@@ -268,9 +209,8 @@ def eliminar_funcionario(id_funcionario):
 
         if funcionario["id"] == id_funcionario:
 
+            delete_funcionario(id_funcionario)
             funcionarios.remove(funcionario)
-
-            guardar_funcionarios()
 
             escrever_log(
                 f"Funcionário '{funcionario['nome']}' eliminado."

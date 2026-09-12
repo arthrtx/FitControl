@@ -1,5 +1,3 @@
-import json
-import os
 from datetime import datetime, timedelta
 
 import cv2
@@ -9,6 +7,10 @@ import insightface
 from projeto_ginasio.Camara import tirarFoto
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import alunos, alunos_excluidos
+from projeto_ginasio.db_adapter import (
+    save_alunos, add_aluno, update_aluno, delete_aluno,
+    save_alunos_excluidos, add_aluno_excluido, remove_aluno_excluido, add_log
+)
 
 def gerar_embedding(caminho_foto):
 
@@ -66,21 +68,16 @@ def inicializar():
 # ======================================================
 def guardar_alunos():
     try:
-        with open(ARQUIVO, "w", encoding="utf-8") as ficheiro:
-            json.dump(alunos, ficheiro, indent=4, ensure_ascii=False)
-
+        save_alunos(alunos)
     except Exception as erro:
         raise Exception(f"Não foi possível guardar os alunos: {erro}")
 
 
 # logs
 # ======================================================
-def escrever_log(evento):
+def escrever_log(evento, tipo="geral"):
     try:
-        with open(ARQUIVO_LOG, "a", encoding="utf-8") as ficheiro:
-            data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            ficheiro.write(f"{data} - {evento}\n")
-
+        add_log(evento, tipo=tipo)
     except Exception as erro:
         raise Exception(f"Não foi possível escrever no log: {erro}")
 
@@ -88,21 +85,8 @@ def escrever_log(evento):
 # carregar alunos
 # ======================================================
 def carregar_alunos():
-
-    if not os.path.exists(ARQUIVO):
-        alunos.clear()
-        guardar_alunos()
-        return
-
-    try:
-        with open(ARQUIVO, "r", encoding="utf-8") as ficheiro:
-            dados = json.load(ficheiro)
-
-            alunos.clear()
-            alunos.extend(dados)
-
-    except Exception as erro:
-        raise Exception(f"Não foi possível carregar os alunos: {erro}")
+    # Dados agora são carregados do banco de dados em dados.py
+    pass
 
 
 # gerar ID
@@ -136,20 +120,20 @@ def criar_aluno(nome, telemovel, documento, plano):
     telemovel = telemovel.strip()
     documento = documento.strip()
 
+    if not nome:
+        return "Erro: O nome não pode estar vazio."
     if len(nome.split()) < 2:
-        return False
-    if nome == "":
-        return False
+        return "Erro: O nome deve conter pelo menos 2 palavras (nome e sobrenome)."
         
+    if not documento:
+        return "Erro: O documento não pode estar vazio."
     if len(documento) > 12:
-        return False
-    if documento == "":
-        return False
+        return "Erro: O documento não pode ter mais de 12 caracteres."
         
     if not telemovel.isdigit():
-        return False
+        return "Erro: O telemóvel deve conter apenas dígitos numéricos."
     if len(telemovel) != 9:
-        return False
+        return "Erro: O telemóvel deve ter exatamente 9 dígitos."
         
         
     planos_validos = [
@@ -160,13 +144,13 @@ def criar_aluno(nome, telemovel, documento, plano):
     ]
 
     if plano not in planos_validos:
-            return False
+        return f"Erro: O plano deve ser um dos seguintes: {', '.join(planos_validos)}."
 
 
     id_aluno = gerar_id()
 
     if documento_existe(documento):
-            return False
+        return "Erro: Já existe um aluno com este documento."
 
 
     try:
@@ -203,9 +187,9 @@ def criar_aluno(nome, telemovel, documento, plano):
     }
 
 
+    add_aluno(novo_aluno)
     alunos.append(novo_aluno)
-    guardar_alunos()
-    escrever_log(f"Aluno '{nome}' registado.")
+    escrever_log(f"Aluno '{nome}' registado.", tipo="aluno")
 
     return True
 
@@ -228,20 +212,20 @@ def editar_aluno(id_aluno, nome, telemovel, documento, plano):
     telemovel = telemovel.strip()
     documento = documento.strip()
 
+    if not nome:
+        return "Erro: O nome não pode estar vazio."
     if len(nome.split()) < 2:
-        return False
-    if nome == "":
-        return False
+        return "Erro: O nome deve conter pelo menos 2 palavras (nome e sobrenome)."
         
+    if not documento:
+        return "Erro: O documento não pode estar vazio."
     if len(documento) > 12:
-        return False
-    if documento == "":
-        return False
+        return "Erro: O documento não pode ter mais de 12 caracteres."
         
     if not telemovel.isdigit():
-        return False
+        return "Erro: O telemóvel deve conter apenas dígitos numéricos."
     if len(telemovel) != 9:
-        return False
+        return "Erro: O telemóvel deve ter exatamente 9 dígitos."
         
         
     planos_validos = [
@@ -252,27 +236,27 @@ def editar_aluno(id_aluno, nome, telemovel, documento, plano):
     ]
 
     if plano not in planos_validos:
-        return False
+        return f"Erro: O plano deve ser um dos seguintes: {', '.join(planos_validos)}."
 
 
     for outro in alunos:
 
         if outro["documento"] == documento and outro["id"] != id_aluno:
-            return False
+            return "Erro: Já existe outro aluno com este documento."
 
 
     for aluno in alunos:
 
-        if aluno["id"] == id_aluno: 
+        if aluno["id"] == id_aluno:
 
             aluno["nome"] = nome
             aluno["telemovel"] = telemovel
             aluno["documento"] = documento
             aluno["plano"] = plano
 
-            guardar_alunos()
+            update_aluno(aluno)
 
-            escrever_log(f"Aluno '{nome}' editado.")
+            escrever_log(f"Aluno '{nome}' editado.", tipo="aluno")
 
             return True
 
@@ -291,17 +275,16 @@ def eliminar_aluno(id_aluno):
 
             aluno_excluido["data_exclusao"] = datetime.now().strftime("%d/%m/%Y")
 
+            add_aluno_excluido(aluno_excluido)
             alunos_excluidos.append(aluno_excluido)
 
+            delete_aluno(id_aluno)
             alunos.remove(aluno)
 
 
-            guardar_alunos()
-            guardar_alunos_excluidos()
-
-
             escrever_log(
-                f"Aluno '{aluno['nome']}' movido para arquivo de exclusão."
+                f"Aluno '{aluno['nome']}' movido para arquivo de exclusão.",
+                tipo="aluno"
             )
 
             return True
@@ -323,17 +306,16 @@ def restaurar_aluno(id_aluno):
 
             aluno.pop("data_exclusao", None)
 
+            add_aluno(aluno)
             alunos.append(aluno)
 
+            remove_aluno_excluido(id_aluno)
             alunos_excluidos.remove(aluno)
 
 
-            guardar_alunos()
-            guardar_alunos_excluidos()
-
-
             escrever_log(
-                f"Aluno '{aluno['nome']}' restaurado."
+                f"Aluno '{aluno['nome']}' restaurado.",
+                tipo="aluno"
             )
 
             return True
@@ -354,55 +336,17 @@ def listar_alunos_excluidos():
 # carregar alunos excluidos
 # ======================================================
 def carregar_alunos_excluidos():
-
-    if not os.path.exists(ARQUIVO_ALUNOS_EXCLUIDOS):
-
-        alunos_excluidos.clear()
-
-        guardar_alunos_excluidos()
-
-        return
-
-
-    try:
-
-        with open(ARQUIVO_ALUNOS_EXCLUIDOS, "r", encoding="utf-8") as ficheiro:
-
-            dados = json.load(ficheiro)
-
-            alunos_excluidos.clear()
-
-            alunos_excluidos.extend(dados)
-
-
-    except Exception as erro:
-
-        raise Exception(
-            f"Não foi possível carregar alunos excluídos: {erro}"
-        )
+    # Dados agora são carregados do banco de dados em dados.py
+    pass
 
 
 # guardar alunos excluidos
 # ======================================================
 def guardar_alunos_excluidos():
-
     try:
-
-        with open(ARQUIVO_ALUNOS_EXCLUIDOS, "w", encoding="utf-8") as ficheiro:
-
-            json.dump(
-                alunos_excluidos,
-                ficheiro,
-                indent=4,
-                ensure_ascii=False
-            )
-
-
+        save_alunos_excluidos(alunos_excluidos)
     except Exception as erro:
-
-        raise Exception(
-            f"Não foi possível guardar alunos excluídos: {erro}"
-        )
+        raise Exception(f"Não foi possível guardar alunos excluídos: {erro}")
 
 
 # limpar alunos excluidos
@@ -432,7 +376,8 @@ def limpar_alunos_expirados():
         alunos_excluidos.remove(aluno)
 
         escrever_log(
-            f"Aluno '{aluno['nome']}' eliminado definitivamente após 60 dias."
+            f"Aluno '{aluno['nome']}' eliminado definitivamente após 60 dias.",
+            tipo="aluno"
         )
 
 

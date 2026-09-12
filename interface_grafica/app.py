@@ -12,7 +12,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from PIL import Image
 
-from projeto_ginasio.config import ARQUIVO_LOG, PASTA_ARQUIVOS
+import cv2 as cv
+
 from projeto_ginasio.dados import pagamentos as pagamentos_db, presencas as presencas_db
 from interface_grafica.constants import CORES, TEMA
 from interface_grafica.dialogs import AlunoFormDialog, FuncionarioFormDialog
@@ -32,19 +33,20 @@ from interface_grafica.widgets import (
 setup_paths()
 
 from projeto_ginasio.main import inicializar
-from projeto_ginasio.Camara import gravarVideo, ligarCam
-from modulos import estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios
+import projeto_ginasio.Camara
+from modulos import estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios, acessos
+from projeto_ginasio.db_adapter import get_logs_por_tipo
 
 
 class DashboardData:
     @staticmethod
     def presencas_30_dias():
-        hoje = datetime.now().date()
+        hoje = projeto_ginasio.Camara.datetime.now().date()
         dias = [hoje - timedelta(days=i) for i in range(29, -1, -1)]
         contagem = {dia: 0 for dia in dias}
         for registo in presencas_db:
             try:
-                data = datetime.strptime(registo["data"], "%d/%m/%Y").date()
+                data = projeto_ginasio.Camara.datetime.strptime(registo["data"], "%d/%m/%Y").date()
             except (ValueError, KeyError):
                 continue
             if data in contagem:
@@ -54,7 +56,7 @@ class DashboardData:
 
     @staticmethod
     def receita_mensal():
-        agora = datetime.now()
+        agora = projeto_ginasio.Camara.datetime.now()
         mes, ano = agora.month, agora.year
         chaves = []
         for _ in range(12):
@@ -66,7 +68,7 @@ class DashboardData:
         totais = defaultdict(float)
         for pagamento in pagamentos_db:
             try:
-                data = datetime.strptime(pagamento["data_pagamento"], "%d/%m/%Y")
+                data = projeto_ginasio.Camara.datetime.strptime(pagamento["data_pagamento"], "%d/%m/%Y")
                 totais[(data.month, data.year)] += float(pagamento.get("valor", 0))
             except (ValueError, TypeError, KeyError):
                 continue
@@ -394,6 +396,18 @@ class AcademiaApp(ctk.CTk):
         except Exception as erro:
             print(f"Erro ao parar Face ID: {erro}")
 
+        # Espera mesmo que o thread do Face ID termine antes de continuar.
+        # Só ele pode libertar a câmera em segurança (ver o comentário em
+        # parar_reconhecimento). Se não esperarmos aqui, quem chamou
+        # parar_face_id() pode logo a seguir tentar abrir a câmera (ex.: ao
+        # entrar na página Câmara) enquanto o thread anterior ainda está a
+        # meio de um camera.read() — e é isso que fazia a aplicação
+        # bloquear/fechar sozinha.
+        if self._face_id_thread and self._face_id_thread.is_alive():
+            self._face_id_thread.join(timeout=3.0)
+            if self._face_id_thread.is_alive():
+                print("Aviso: o thread do Face ID demorou a terminar.")
+
     def _cancelar_arranque_face_id(self):
         if self._face_id_start_job:
             try:
@@ -431,7 +445,7 @@ class AcademiaApp(ctk.CTk):
             return
 
         self._dashboard_clock.configure(
-            text=datetime.now().strftime("%H:%M:%S")
+            text=projeto_ginasio.Camara.datetime.now().strftime("%H:%M:%S")
         )
         self._agendar_relogio_dashboard()
 
@@ -447,9 +461,20 @@ class AcademiaApp(ctk.CTk):
             return
 
         try:
-            from projeto_ginasio.reconhecimento.reconhecimento import obter_estado_reconhecimento
+            from projeto_ginasio.reconhecimento.reconhecimento import (
+                obter_estado_reconhecimento,
+                obter_novas_presencas,
+            )
 
             estado = obter_estado_reconhecimento()
+
+            counter = obter_novas_presencas()
+            if not hasattr(self, "_face_id_counter"):
+                self._face_id_counter = 0
+            if counter != self._face_id_counter:
+                self._face_id_counter = counter
+                self._atualizar_presencas()
+
         except Exception as erro:
             estado = {
                 "estado": "erro",
@@ -499,7 +524,8 @@ class AcademiaApp(ctk.CTk):
             border_width=0,
         )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_rowconfigure(11, weight=1)
+        self.sidebar.grid_columnconfigure(0, weight=1)
+        self.sidebar.grid_rowconfigure(13, weight=1)
 
         ctk.CTkLabel(
             self.sidebar,
@@ -535,6 +561,7 @@ class AcademiaApp(ctk.CTk):
         nav_items.extend([
             ("pagamentos", "💳 Pagamentos"),
             ("presencas", "✅ Presenças"),
+            ("arq_presencas", "📁 Arquivo de Presenças"),
             ("camera", "📷 Câmara"),
         ])
 
@@ -563,14 +590,14 @@ class AcademiaApp(ctk.CTk):
             text_color=TEMA["muted"],
             hover_color=TEMA["sidebar_hover"],
             command=self.logout,
-        ).grid(row=12, column=0, padx=12, pady=(10, 5), sticky="sew")
+        ).grid(row=14, column=0, padx=12, pady=(10, 5), sticky="sew")
 
         ctk.CTkLabel(
             self.sidebar,
             text="Sistema de Gestão v4.0",
             text_color=TEMA["muted"],
             font=ctk.CTkFont(size=10),
-        ).grid(row=13, column=0, padx=20, pady=(0, 15), sticky="sw")
+        ).grid(row=15, column=0, padx=20, pady=(0, 15), sticky="sw")
 
         self.content = ctk.CTkFrame(self, corner_radius=0, fg_color=TEMA["bg"])
         self.content.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
@@ -582,6 +609,7 @@ class AcademiaApp(ctk.CTk):
             "alunos": self._criar_alunos(),
             "pagamentos": self._criar_pagamentos(),
             "presencas": self._criar_presencas(),
+            "arq_presencas": self._criar_arq_presencas(),
             "funcionarios": self._criar_funcionarios(),
             "camera": self._criar_camera(),
             "administracao": self._criar_administracao(),
@@ -681,13 +709,29 @@ class AcademiaApp(ctk.CTk):
                 self._atualizar_pagamentos()
             elif nome == "presencas":
                 self._atualizar_presencas()
-                self.iniciar_face_id()
+                try:
+                    from projeto_ginasio.reconhecimento.reconhecimento import (
+                        reconhecimento_ativo,
+                        _atualizar_estado,
+                    )
+                    if not reconhecimento_ativo():
+                        _atualizar_estado(
+                            "parado",
+                            "Face ID inativo",
+                            "Clique no botão 'Iniciar Face ID' para começar o reconhecimento facial.\n"
+                            "Pressione Q na janela do Face ID para fechar o módulo.",
+                        )
+                except Exception:
+                    pass
                 self._agendar_estado_face_id()
+            elif nome == "camera":
+                self._detetar_cameras()
             elif nome == "funcionarios":
                 self._atualizar_funcionarios()
+            elif nome == "arq_presencas":
+                self._atualizar_arq_presencas()
             elif nome == "administracao":
-                self._carregar_historico()
-                self._carregar_arquivos_historico()
+                self._carregar_logs_administracao()
         except Exception as erro:
             self._cancelar_atualizacao_dashboard()
             self._cancelar_relogio_dashboard()
@@ -733,7 +777,7 @@ class AcademiaApp(ctk.CTk):
         acoes.grid(row=0, column=1, sticky="e")
         self._dashboard_clock = ctk.CTkLabel(
             acoes,
-            text=datetime.now().strftime("%H:%M:%S"),
+            text=projeto_ginasio.Camara.datetime.now().strftime("%H:%M:%S"),
             font=ctk.CTkFont(family="Consolas", size=24, weight="bold"),
             text_color=TEMA["accent"],
         )
@@ -866,6 +910,23 @@ class AcademiaApp(ctk.CTk):
 
         table_frame = TablePanel(frame)
         table_frame.grid(row=1, column=0, sticky="nsew")
+        table_frame.grid_rowconfigure(1, weight=1)
+
+        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(10, 0))
+        busca_frame.grid_columnconfigure(0, weight=0)
+        busca_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            busca_frame,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=TEMA["muted"],
+        ).grid(row=0, column=0, sticky="w", padx=(6, 6))
+        self.alunos_pesquisa = styled_entry(
+            busca_frame, placeholder_text="Pesquisar aluno por nome..."
+        )
+        self.alunos_pesquisa.grid(row=0, column=1, sticky="ew")
+        self.alunos_pesquisa.bind("<KeyRelease>", lambda _e: self._atualizar_lista_alunos())
 
         cols = ("id", "nome", "telemovel", "documento", "plano", "mensalidade")
         self.tree_alunos = ttk.Treeview(
@@ -895,8 +956,8 @@ class AcademiaApp(ctk.CTk):
 
         scroll = ctk.CTkScrollbar(table_frame, command=self.tree_alunos.yview)
         self.tree_alunos.configure(yscrollcommand=scroll.set)
-        self.tree_alunos.grid(row=0, column=0, sticky="nsew", padx=(12, 0), pady=12)
-        scroll.grid(row=0, column=1, sticky="ns", pady=12, padx=(0, 12))
+        self.tree_alunos.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=12)
+        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
         self.tree_alunos.bind("<<TreeviewSelect>>", self._ao_selecionar_aluno)
 
         sidebar = SurfaceCard(frame)
@@ -927,6 +988,11 @@ class AcademiaApp(ctk.CTk):
             font=ctk.CTkFont(size=14, weight="bold"),
         )
         self.aluno_foto_label.grid(row=2, column=0, padx=16, pady=(0, 14))
+
+        # Mantém vivas as CTkImage (PhotoImage interno) das fotos exibidas,
+        # evitando o erro "pyimage ... does not exist" ao trocar de página.
+        self._aluno_ctk_image = None
+        self._aluno_imgs = []
 
         self._aluno_info_widgets = {}
         campos = [
@@ -1199,11 +1265,20 @@ class AcademiaApp(ctk.CTk):
             if valores:
                 aluno_selecionado = str(valores[0])
 
+        termo = ""
+        if hasattr(self, "alunos_pesquisa"):
+            termo = self.alunos_pesquisa.get().strip().lower()
+
+        alunos_filtrados = [
+            a for a in gestao_alunos.listar_alunos()
+            if not termo or termo in a["nome"].lower()
+        ]
+
         for item in self.tree_alunos.get_children():
             self.tree_alunos.delete(item)
 
         item_para_reselecionar = None
-        for indice, aluno in enumerate(gestao_alunos.listar_alunos()):
+        for indice, aluno in enumerate(alunos_filtrados):
             valida = pagamentos.mensalidade_valida(aluno["id"])
             estado = "✓ Válida" if valida else "✗ Expirada"
             iid = f"aluno_{indice}"
@@ -1275,10 +1350,19 @@ class AcademiaApp(ctk.CTk):
     def _limpar_detalhes_aluno(self):
         self._aluno_ctk_image = None
         if hasattr(self, "aluno_foto_label"):
+            # O customtkinter CTkLabel, ao receber image=None, nao limpa o
+            # '-image' do Label tk interno (a sua _update_image nao faz nada
+            # para None). Se nao limparmos aqui explicitamente, esse Label
+            # continua a referenciar uma PhotoImage ja destruida pelo GC e o
+            # proximo configure(text=...) dispara
+            # 'image "pyimage... " does not exist'.
+            if hasattr(self.aluno_foto_label, "_label"):
+                self.aluno_foto_label._label.configure(image="")
             self.aluno_foto_label.configure(
                 image=None,
                 text="Selecione um aluno",
             )
+        self._aluno_imgs = []
         if hasattr(self, "_aluno_info_widgets"):
             for widget in self._aluno_info_widgets.values():
                 widget.configure(text="—")
@@ -1303,11 +1387,26 @@ class AcademiaApp(ctk.CTk):
             self._aluno_info_widgets[chave].configure(text=valor)
 
         caminho_foto = aluno.get("foto", "")
+        # O customtkinter CTkLabel, ao receber image=None, nao limpa o '-image'
+        # do Label tk interno. Ao trocar de aluno com foto, libertamos primeiro
+        # essa referencia explicitamente para nao deixar uma PhotoImage morta
+        # apontada pelo Label (causa do erro "pyimage... does not exist").
+        if hasattr(self.aluno_foto_label, "_label"):
+            self.aluno_foto_label._label.configure(image="")
         if caminho_foto and caminho_foto != "sem_foto" and os.path.exists(caminho_foto):
             try:
-                imagem = Image.open(caminho_foto)
-                self._aluno_ctk_image = ctk.CTkImage(light_image=imagem, dark_image=imagem, size=(180, 180))
-                self.aluno_foto_label.configure(image=self._aluno_ctk_image, text="")
+                imagem = Image.open(caminho_foto).convert("RGB")
+                self.aluno_foto_label.configure(image=None)
+                ctk_img = ctk.CTkImage(
+                    light_image=imagem,
+                    dark_image=imagem,
+                    size=(180, 180),
+                )
+                # Manter a CTkImage (e o PhotoImage interno) viva enquanto a
+                # página existir — evita o garbage collector.
+                self._aluno_imgs.append(ctk_img)
+                self._aluno_ctk_image = ctk_img
+                self.aluno_foto_label.configure(image=ctk_img, text="")
                 return
             except Exception:
                 pass
@@ -1317,17 +1416,26 @@ class AcademiaApp(ctk.CTk):
 
     def _novo_aluno(self):
         def callback(nome, telemovel, documento, plano):
+            messagebox.showinfo(
+                "Foto do aluno",
+                "Vai abrir-se uma janela da câmara (fora desta aplicação).\n\n"
+                "• Centre o rosto do aluno na câmara\n"
+                "• Pressione P para tirar a foto\n"
+                "• Pressione Q para cancelar sem foto",
+            )
             self.withdraw()
             try:
-                ok = gestao_alunos.criar_aluno(nome, telemovel, documento, plano)
+                resultado = gestao_alunos.criar_aluno(nome, telemovel, documento, plano)
             except Exception as erro:
                 self.deiconify()
                 messagebox.showerror("Erro", str(erro))
                 return
             self.deiconify()
-            if ok:
+            if resultado is True:
                 messagebox.showinfo("Sucesso", f"Aluno '{nome}' registado com sucesso.")
                 self._atualizar_lista_alunos()
+            elif isinstance(resultado, str) and resultado.startswith("Erro"):
+                messagebox.showerror("Erro de Validação", resultado)
             else:
                 messagebox.showerror(
                     "Erro",
@@ -1346,12 +1454,14 @@ class AcademiaApp(ctk.CTk):
             return
 
         def callback(nome, telemovel, documento, plano):
-            ok = gestao_alunos.editar_aluno(id_aluno, nome, telemovel, documento, plano)
-            if ok:
+            resultado = gestao_alunos.editar_aluno(id_aluno, nome, telemovel, documento, plano)
+            if resultado is True:
                 messagebox.showinfo("Sucesso", f"Aluno '{nome}' atualizado.")
                 self._atualizar_lista_alunos()
+            elif isinstance(resultado, str) and resultado.startswith("Erro"):
+                messagebox.showerror("Erro de Validação", resultado)
             else:
-                messagebox.showerror("Erro", "Documento já utilizado por outro aluno.")
+                messagebox.showerror("Erro", "Não foi possível atualizar o aluno.")
 
         AlunoFormDialog(self, "Editar Aluno", callback, aluno=aluno)
 
@@ -1398,6 +1508,24 @@ class AcademiaApp(ctk.CTk):
 
         table_frame = TablePanel(frame)
         table_frame.grid(row=1, column=0, sticky="nsew")
+        table_frame.grid_rowconfigure(1, weight=1)
+
+        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
+        busca_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            busca_frame,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=TEMA["muted"],
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.excluidos_pesquisa = styled_entry(
+            busca_frame, placeholder_text="Pesquisar aluno por nome..."
+        )
+        self.excluidos_pesquisa.grid(row=0, column=1, sticky="ew")
+        self.excluidos_pesquisa.bind(
+            "<KeyRelease>", lambda _e: self._atualizar_lista_excluidos()
+        )
 
         cols = ("id", "nome", "documento", "plano", "data_exclusao")
         self.tree_excluidos = ttk.Treeview(
@@ -1418,8 +1546,8 @@ class AcademiaApp(ctk.CTk):
 
         scroll = ctk.CTkScrollbar(table_frame, command=self.tree_excluidos.yview)
         self.tree_excluidos.configure(yscrollcommand=scroll.set)
-        self.tree_excluidos.grid(row=0, column=0, sticky="nsew", padx=(12, 0), pady=12)
-        scroll.grid(row=0, column=1, sticky="ns", pady=12, padx=(0, 12))
+        self.tree_excluidos.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=12)
+        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
 
         ctk.CTkLabel(
             frame,
@@ -1434,7 +1562,16 @@ class AcademiaApp(ctk.CTk):
         for item in self.tree_excluidos.get_children():
             self.tree_excluidos.delete(item)
 
-        for indice, aluno in enumerate(gestao_alunos.listar_alunos_excluidos()):
+        termo = ""
+        if hasattr(self, "excluidos_pesquisa"):
+            termo = self.excluidos_pesquisa.get().strip().lower()
+
+        excluidos = [
+            a for a in gestao_alunos.listar_alunos_excluidos()
+            if not termo or termo in a["nome"].lower()
+        ]
+
+        for indice, aluno in enumerate(excluidos):
             self.tree_excluidos.insert(
                 "",
                 "end",
@@ -1478,8 +1615,14 @@ class AcademiaApp(ctk.CTk):
         frame.grid_rowconfigure(2, weight=1)
 
         header = PageHeader(frame, "Pagamentos", "Registar mensalidades e consultar histórico")
-        header.actions.grid_remove()
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+
+        if self.admin:
+            btn_danger(
+                header.actions,
+                text="🗑 Apagar Pagamento",
+                command=self._apagar_pagamento_selecionado,
+            ).pack(side="right", padx=4)
 
         form = SurfaceCard(frame)
         form.grid(row=1, column=0, sticky="ew", pady=(0, 6))
@@ -1506,6 +1649,24 @@ class AcademiaApp(ctk.CTk):
 
         table_frame = TablePanel(frame)
         table_frame.grid(row=2, column=0, sticky="nsew")
+        table_frame.grid_rowconfigure(1, weight=1)
+
+        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
+        busca_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            busca_frame,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=TEMA["muted"],
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.pag_pesquisa = styled_entry(
+            busca_frame, placeholder_text="Pesquisar por nome do aluno..."
+        )
+        self.pag_pesquisa.grid(row=0, column=1, sticky="ew")
+        self.pag_pesquisa.bind(
+            "<KeyRelease>", lambda _e: self._atualizar_pagamentos()
+        )
 
         cols = ("aluno", "plano", "valor", "data_pagamento", "data_vencimento", "estado")
         self.tree_pagamentos = ttk.Treeview(
@@ -1525,8 +1686,9 @@ class AcademiaApp(ctk.CTk):
 
         scroll = ctk.CTkScrollbar(table_frame, command=self.tree_pagamentos.yview)
         self.tree_pagamentos.configure(yscrollcommand=scroll.set)
-        self.tree_pagamentos.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=10)
-        scroll.grid(row=0, column=1, sticky="ns", pady=10, padx=(0, 10))
+        self.tree_pagamentos.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=10)
+        scroll.grid(row=1, column=1, sticky="ns", pady=10, padx=(0, 10))
+        self._pag_tree_map = {}
 
         return frame
 
@@ -1548,12 +1710,25 @@ class AcademiaApp(ctk.CTk):
         for item in self.tree_pagamentos.get_children():
             self.tree_pagamentos.delete(item)
 
+        termo = ""
+        if hasattr(self, "pag_pesquisa"):
+            termo = self.pag_pesquisa.get().strip().lower()
+
+        self._pag_tree_map = {}
+        indice = 0
         for pag in reversed(pagamentos.pagamentos):
+            nome = nome_aluno(pag["id_aluno"])
+            if termo and termo not in nome.lower():
+                continue
+            iid = f"pag_{indice}"
+            id_pagamento = pag.get("id")
+            self._pag_tree_map[iid] = id_pagamento
             self.tree_pagamentos.insert(
                 "",
                 "end",
+                iid=iid,
                 values=(
-                    nome_aluno(pag["id_aluno"]),
+                    nome,
                     pag["plano"],
                     pag["valor"],
                     pag["data_pagamento"],
@@ -1561,6 +1736,55 @@ class AcademiaApp(ctk.CTk):
                     pag["estado"],
                 ),
             )
+            indice += 1
+
+    def _pedir_senha_admin(self, titulo, mensagem):
+        """Pede a palavra-passe do utilizador atual (que tem de ser
+        administrador) para confirmar uma ação irreversível."""
+        from tkinter import simpledialog
+        senha = simpledialog.askstring(
+            titulo,
+            mensagem,
+            show="*",
+            parent=self,
+        )
+        if senha is None:
+            return False
+        if not self.utilizador or senha != self.utilizador.get("senha"):
+            messagebox.showerror("Erro", "Palavra-passe incorreta.")
+            return False
+        return True
+
+    def _apagar_pagamento_selecionado(self):
+        if not self.admin:
+            return
+        selecoes = self.tree_pagamentos.selection()
+        if not selecoes:
+            messagebox.showinfo(
+                "Pagamento", "Selecione primeiro o pagamento a apagar na lista."
+            )
+            return
+        iid = selecoes[0]
+        id_pagamento = self._pag_tree_map.get(iid)
+        if not id_pagamento:
+            messagebox.showerror("Erro", "Não foi possível identificar o pagamento.")
+            return
+
+        valores = self.tree_pagamentos.item(iid, "values")
+        descricao = f"{valores[0]} — {valores[2]} € ({valores[3]})"
+
+        if not self._pedir_senha_admin(
+            "Apagar pagamento",
+            f"Deseja apagar o seguinte pagamento?\n\n{descricao}\n\n"
+            "Introduza a palavra-passe do administrador para confirmar.",
+        ):
+            return
+
+        if pagamentos.eliminar_pagamento(id_pagamento):
+            self._atualizar_pagamentos()
+            messagebox.showinfo("Sucesso", "Pagamento apagado com sucesso.")
+        else:
+            messagebox.showerror("Erro", "Não foi possível apagar o pagamento.")
 
     def _registar_pagamento(self):
         selecionado = self.pag_aluno_var.get()
@@ -1595,6 +1819,12 @@ class AcademiaApp(ctk.CTk):
         header = PageHeader(frame, "Presenças", "Registar entradas e consultar o histórico diário")
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
+        btn_primary(
+            header.actions,
+            text="📁 Arquivo de Presenças",
+            command=lambda: self._mostrar_pagina("arq_presencas"),
+        ).pack(side="right", padx=4)
+
         form = SurfaceCard(frame)
         form.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         form.grid_columnconfigure(1, weight=1)
@@ -1613,7 +1843,13 @@ class AcademiaApp(ctk.CTk):
         ).grid(row=0, column=2, padx=10, pady=14)
         btn_secondary(
             form, text="Atualizar", command=self._atualizar_presencas
-        ).grid(row=0, column=3, padx=(0, 16), pady=14)
+        ).grid(row=0, column=3, padx=(0, 6), pady=14)
+        btn_primary(
+            form, text="🎯 Iniciar Face ID", command=self.iniciar_face_id, fg_color=TEMA["success"]
+        ).grid(row=0, column=4, padx=(0, 6), pady=14)
+        btn_danger(
+            form, text="Parar Face ID", command=self.parar_face_id
+        ).grid(row=0, column=5, padx=(0, 16), pady=14)
 
         estado_card = SurfaceCard(frame)
         estado_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
@@ -1639,7 +1875,8 @@ class AcademiaApp(ctk.CTk):
 
         self.pres_face_estado_detalhe = ctk.CTkLabel(
             estado_card,
-            text="Abra a página Presenças para iniciar o reconhecimento facial.",
+            text="Clique no botão 'Iniciar Face ID' para começar o reconhecimento facial.\n"
+                 "Pressione Q na janela do Face ID para fechar o módulo.",
             font=ctk.CTkFont(size=12),
             text_color=TEMA["muted"],
             justify="left",
@@ -1684,7 +1921,10 @@ class AcademiaApp(ctk.CTk):
         for item in self.tree_presencas.get_children():
             self.tree_presencas.delete(item)
 
-        for pres in reversed(presencas.presencas):
+        with presencas._presencas_lock:
+            lista_pres = list(reversed(presencas.presencas))
+
+        for pres in lista_pres:
             self.tree_presencas.insert(
                 "",
                 "end",
@@ -1708,92 +1948,262 @@ class AcademiaApp(ctk.CTk):
         else:
             messagebox.showerror("Erro", "Não foi possível registar a presença.")
 
+    def _criar_arq_presencas(self):
+        frame = PageFrame(self.content)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(1, weight=1)
+
+        header = PageHeader(
+            frame,
+            "Arquivo de Presenças",
+            "Histórico permanente de presenças (guardado nos Logs do sistema)",
+        )
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+
+        if self.admin:
+            btn_danger(
+                header.actions,
+                text="🗑 Apagar Arquivo",
+                command=self._apagar_arquivo_presencas,
+            ).pack(side="right", padx=4)
+
+        table_frame = TablePanel(frame)
+        table_frame.grid(row=1, column=0, sticky="nsew")
+        table_frame.grid_rowconfigure(1, weight=1)
+
+        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
+        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
+        busca_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(
+            busca_frame,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=TEMA["muted"],
+        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
+        self.arq_pres_pesquisa = styled_entry(
+            busca_frame, placeholder_text="Pesquisar presença por nome do aluno..."
+        )
+        self.arq_pres_pesquisa.grid(row=0, column=1, sticky="ew")
+        self.arq_pres_pesquisa.bind(
+            "<KeyRelease>", lambda _e: self._atualizar_arq_presencas()
+        )
+
+        cols = ("data", "evento")
+        self.tree_arq_presencas = ttk.Treeview(
+            table_frame, columns=cols, show="headings", style="Academia.Treeview"
+        )
+        headings = {"data": "Data / Hora", "evento": "Presença"}
+        for col in cols:
+            self.tree_arq_presencas.heading(col, text=headings[col])
+            self.tree_arq_presencas.column(
+                "data", width=170, anchor="center"
+            )
+            self.tree_arq_presencas.column("evento", width=500, anchor="w")
+
+        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_arq_presencas.yview)
+        self.tree_arq_presencas.configure(yscrollcommand=scroll.set)
+        self.tree_arq_presencas.grid(
+            row=1, column=0, sticky="nsew", padx=(12, 0), pady=12
+        )
+        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
+
+        return frame
+
+    def _atualizar_arq_presencas(self):
+        for item in self.tree_arq_presencas.get_children():
+            self.tree_arq_presencas.delete(item)
+
+        termo = ""
+        if hasattr(self, "arq_pres_pesquisa"):
+            termo = self.arq_pres_pesquisa.get().strip().lower()
+
+        logs = acessos.arquivo_presencas()
+        for log in logs:
+            evento = log["evento"]
+            if termo and termo not in evento.lower():
+                continue
+            self.tree_arq_presencas.insert(
+                "", "end", values=(log["data"], evento)
+            )
+
+    def _apagar_arquivo_presencas(self):
+        if not self.admin:
+            return
+        if not self._pedir_senha_admin(
+            "Apagar arquivo de presenças",
+            "Tem a certeza que deseja apagar TODO o histórico permanente de "
+            "presenças e as presenças do dia atual?\n\n"
+            "Introduza a palavra-passe do administrador para confirmar.",
+        ):
+            return
+        acessos.apagar_arquivo_presencas()
+        self._atualizar_arq_presencas()
+        self._atualizar_presencas()
+        messagebox.showinfo(
+            "Sucesso",
+            "Arquivo de presenças e presenças do dia atual apagados.",
+        )
+
     def _criar_camera(self):
         frame = PageFrame(self.content)
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(2, weight=1)
 
-        header = PageHeader(frame, "Câmara", "Abrir a webcam ou iniciar gravação sem sair da aplicação")
+        header = PageHeader(frame, "Câmara", "Configure a câmara usada no Face ID e no registo de alunos")
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
-        info = SurfaceCard(frame)
-        info.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        info.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            info,
-            text="Controlo da Webcam",
-            font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=TEMA["text"],
-        ).pack(padx=20, pady=(18, 8), anchor="w")
-        ctk.CTkLabel(
-            info,
-            text="Utilize os botões abaixo para abrir a câmara ou gravar vídeo.\n"
-            "As funções abrem uma janela OpenCV separada.\n\n"
-            "Atalhos na janela da câmara:\n"
-            "  • Modo foto: B (preto e branco), C (cor), P (capturar), Q (sair)\n"
-            "  • Modo vídeo: R (iniciar gravação), S (parar), ESC (sair)",
-            justify="left",
-            font=ctk.CTkFont(size=13),
-            text_color=TEMA["muted"],
-        ).pack(padx=20, pady=(0, 18), anchor="w")
+        # --- Configuração da câmara ---
+        config_card = SurfaceCard(frame)
+        config_card.grid(row=1, column=0, sticky="ew", pady=(0, 12))
+        config_card.grid_columnconfigure(1, weight=1)
+        config_card.grid_columnconfigure(3, weight=1)
 
-        btn_frame = SurfaceCard(frame)
-        btn_frame.grid(row=2, column=0, sticky="w", pady=(0, 10))
+        ctk.CTkLabel(
+            config_card, text="Configuração da Câmara",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEMA["text"],
+        ).grid(row=0, column=0, columnspan=6, padx=20, pady=(18, 12), sticky="w")
+
+        config_atual = projeto_ginasio.Camara.carregar_config_camera()
+        self._cameras_disponiveis = [config_atual["indice"]]
+        indice_atual = config_atual["indice"]
+        largura_atual = config_atual["largura"]
+        altura_atual = config_atual["altura"]
+
+        self._camera_var = ctk.StringVar(value=str(indice_atual))
+
+        ctk.CTkLabel(config_card, text="Câmara:", text_color=TEMA["muted"]).grid(row=1, column=0, padx=(20, 5), pady=(0, 18), sticky="e")
+        self._camera_menu = ctk.CTkOptionMenu(
+            config_card,
+            values=[f"Câmara {i}" for i in self._cameras_disponiveis],
+            command=lambda v: self._camera_var.set(v.replace("Câmara ", "")),
+        )
+        self._camera_menu.set(f"Câmara {indice_atual}")
+        self._camera_menu.grid(row=1, column=1, padx=(5, 10), pady=(0, 18), sticky="w")
+
+        ctk.CTkLabel(config_card, text="Largura:", text_color=TEMA["muted"]).grid(row=1, column=2, padx=(10, 5), pady=(0, 18), sticky="e")
+        self._largura_var = ctk.StringVar(value=str(largura_atual))
+        self._largura_entry = styled_entry(config_card, width=100, textvariable=self._largura_var)
+        self._largura_entry.grid(row=1, column=3, padx=(5, 10), pady=(0, 18), sticky="w")
+
+        ctk.CTkLabel(config_card, text="Altura:", text_color=TEMA["muted"]).grid(row=1, column=4, padx=(10, 5), pady=(0, 18), sticky="e")
+        self._altura_var = ctk.StringVar(value=str(altura_atual))
+        self._altura_entry = styled_entry(config_card, width=100, textvariable=self._altura_var)
+        self._altura_entry.grid(row=1, column=5, padx=(5, 20), pady=(0, 18), sticky="w")
+
+        btn_config_frame = ctk.CTkFrame(config_card, fg_color="transparent")
+        btn_config_frame.grid(row=2, column=0, columnspan=6, padx=20, pady=(0, 18), sticky="ew")
+        btn_config_frame.grid_columnconfigure(0, weight=1)
+
+        btn_secondary(btn_config_frame, text="Detetar câmaras", command=self._detetar_cameras)\
+            .grid(row=0, column=1, padx=5, sticky="e")
+        btn_primary(btn_config_frame, text="Guardar configuração", command=self._guardar_camera_selecionada)\
+            .grid(row=0, column=2, padx=(5, 0), sticky="e")
+
+        # --- Ações ---
+        acoes_card = SurfaceCard(frame)
+        acoes_card.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+
+        ctk.CTkLabel(
+            acoes_card, text="Ações",
+            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEMA["text"],
+        ).pack(padx=20, pady=(18, 4), anchor="w")
+
+        ctk.CTkLabel(
+            acoes_card,
+            text="A câmara abrirá numa janela separada. Pressione Q para fechar.",
+            justify="left", font=ctk.CTkFont(size=13), text_color=TEMA["muted"],
+        ).pack(padx=20, pady=(0, 14), anchor="w")
+
+        btn_frame = ctk.CTkFrame(acoes_card, fg_color="transparent")
+        btn_frame.pack(padx=20, pady=(0, 18), anchor="w")
 
         btn_primary(
-            btn_frame,
-            text="📷 Abrir Câmara",
-            width=200,
-            font=ctk.CTkFont(size=15),
-            command=lambda: self._executar_camera(ligarCam),
-        ).pack(side="left", padx=10)
+            btn_frame, text="Abrir Câmara", width=180, font=ctk.CTkFont(size=14),
+            command=lambda: self._executar_camera(projeto_ginasio.Camara.ligarCam),
+        ).pack(side="left", padx=(0, 10))
 
         btn_secondary(
-            btn_frame,
-            text="🎬 Gravar Vídeo",
-            width=200,
-            font=ctk.CTkFont(size=15),
-            command=lambda: self._executar_camera(gravarVideo),
+            btn_frame, text="Gravar Vídeo", width=180, font=ctk.CTkFont(size=14),
+            command=lambda: self._executar_camera(projeto_ginasio.Camara.gravarVideo),
         ).pack(side="left", padx=10)
 
         return frame
 
+
+    def _detetar_cameras(self):
+        if self._face_id_thread and self._face_id_thread.is_alive():
+            self.parar_face_id()
+
+        def _detetar():
+            try:
+                cameras = projeto_ginasio.Camara.listar_cameras() or [0]
+            except Exception:
+                cameras = [0]
+            self.after(0, lambda: self._cameras_detetadas(cameras))
+
+        threading.Thread(target=_detetar, daemon=True).start()
+
+    def _cameras_detetadas(self, cameras):
+        self._cameras_disponiveis = cameras
+        self._camera_menu.configure(values=[f"Câmara {i}" for i in cameras])
+        self._camera_menu.set(f"Câmara {cameras[0]}")
+        self._camera_var.set(str(cameras[0]))
+
+
+    def _guardar_camera_selecionada(self):
+        try:
+            indice = int(self._camera_var.get())
+            largura = int(self._largura_var.get())
+            altura = int(self._altura_var.get())
+            
+            if largura < 320 or altura < 240:
+                messagebox.showwarning("Resolução inválida", "A resolução mínima é 320x240.")
+                return
+            
+            if largura > 3840 or altura > 2160:
+                messagebox.showwarning("Resolução inválida", "A resolução máxima é 3840x2160.")
+                return
+            
+            projeto_ginasio.Camara.guardar_config_camera(indice=indice, largura=largura, altura=altura)
+            messagebox.showinfo("Sucesso", "Configuração da câmara guardada com sucesso.")
+        except ValueError:
+            messagebox.showwarning("Valor inválido", "Introduza valores numéricos válidos para a resolução.")
+
+
     def _executar_camera(self, funcao):
-        threading.Thread(target=funcao, daemon=True).start()
+        indice = int(self._camera_var.get())
+        if self._face_id_thread and self._face_id_thread.is_alive():
+            self.parar_face_id()
+        threading.Thread(target=funcao, kwargs={"indice_camera": indice}, daemon=True).start()
 
     def _criar_administracao(self):
         frame = PageFrame(self.content)
-        frame.grid_columnconfigure((0, 1), weight=1)
+        frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(2, weight=1)
 
         header = PageHeader(
             frame,
             "Administração",
-            "Consultar o histórico do sistema e gerir arquivos arquivados",
+            "Consultar os Logs de administração e acesso do sistema",
         )
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         btn_secondary(
             header.actions,
             text="🔄 Atualizar",
             width=130,
-            command=self._carregar_historico,
-        ).pack(side="left", padx=4)
-        btn_primary(
-            header.actions,
-            text="📦 Arquivar",
-            width=130,
-            command=self._arquivar_historico,
-        ).pack(side="left", padx=4)
-        btn_secondary(
-            header.actions,
-            text="📂 Arquivo de Alunos",
-            width=130,
-            command=self._abrir_historico,
+            command=self._atualizar_logs_administracao,
         ).pack(side="left", padx=4)
 
+        if self.admin:
+            btn_danger(
+                header.actions,
+                text="🗑 Apagar Todos os Logs",
+                width=180,
+                command=self._apagar_logs_administracao,
+            ).pack(side="right", padx=4)
+
         resumo = SurfaceCard(frame)
-        resumo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 12))
+        resumo.grid(row=1, column=0, sticky="ew", pady=(0, 12))
         resumo.grid_columnconfigure(0, weight=1)
         resumo.grid_columnconfigure(1, weight=0)
 
@@ -1802,39 +2212,44 @@ class AcademiaApp(ctk.CTk):
 
         ctk.CTkLabel(
             info,
-            text="Histórico do sistema",
+            text="Logs do sistema",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color=TEMA["text"],
         ).pack(anchor="w")
         ctk.CTkLabel(
             info,
             text=(
-                "Veja os registos atuais, abra históricos arquivados e mantenha a área "
-                "organizada sem alterar os dados operacionais."
+                "Registos de administração/acesso (login, logout, permissões e "
+                "apagar históricos) guardados na base de dados SQLite."
             ),
             font=ctk.CTkFont(size=12),
             text_color=TEMA["muted"],
             justify="left",
+            wraplength=520,
         ).pack(anchor="w", pady=(4, 0))
 
-        acoes_secundarias = ctk.CTkFrame(resumo, fg_color="transparent")
-        acoes_secundarias.grid(row=0, column=1, sticky="e", padx=18, pady=16)
+        filtro = ctk.CTkFrame(resumo, fg_color="transparent")
+        filtro.grid(row=0, column=1, sticky="e", padx=18, pady=16)
 
-        btn_secondary(
-            acoes_secundarias,
-            text="↻ Recarregar Lista",
-            width=150,
-            command=self._carregar_arquivos_historico,
-        ).pack(side="left", padx=4)
-        btn_danger(
-            acoes_secundarias,
-            text="🗑️ Excluir",
-            width=120,
-            command=self._excluir_historico,
-        ).pack(side="left", padx=4)
+        ctk.CTkLabel(
+            filtro,
+            text="Tipo de registo:",
+            font=ctk.CTkFont(size=12),
+            text_color=TEMA["muted"],
+        ).pack(anchor="w")
+        self.log_filtro_var = ctk.StringVar(value="administracao")
+        self.log_filtro_menu = ctk.CTkOptionMenu(
+            filtro,
+            values=["administracao", "presenca", "pagamento", "aluno",
+                    "funcionario", "geral", "todos"],
+            variable=self.log_filtro_var,
+            command=lambda _v: self._atualizar_logs_administracao(),
+            width=200,
+        )
+        self.log_filtro_menu.pack(anchor="w", pady=(6, 0))
 
         painel_historico = SurfaceCard(frame)
-        painel_historico.grid(row=2, column=0, sticky="nsew", padx=(0, 6))
+        painel_historico.grid(row=2, column=0, sticky="nsew", padx=(0, 0))
         painel_historico.grid_columnconfigure(0, weight=1)
         painel_historico.grid_rowconfigure(1, weight=1)
 
@@ -1844,13 +2259,13 @@ class AcademiaApp(ctk.CTk):
 
         ctk.CTkLabel(
             topo_historico,
-            text="📜 Histórico atual",
+            text="📜 Registos recentes",
             font=ctk.CTkFont(size=15, weight="bold"),
             text_color=TEMA["text"],
         ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
             topo_historico,
-            text="Registos recentes do sistema em tempo real.",
+            text="Eliminado o Histórico de Acessos separado — tudo passa pelos Logs.",
             font=ctk.CTkFont(size=11),
             text_color=TEMA["muted"],
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
@@ -1865,304 +2280,51 @@ class AcademiaApp(ctk.CTk):
         )
         self.txt_historico.grid(row=1, column=0, sticky="nsew", padx=16, pady=16)
 
-        painel_arquivos = TablePanel(frame)
-        painel_arquivos.grid(row=2, column=1, sticky="nsew", padx=(6, 0))
-        painel_arquivos.grid_columnconfigure(0, weight=1)
-        painel_arquivos.grid_rowconfigure(1, weight=1)
-
-        topo_arquivos = ctk.CTkFrame(painel_arquivos, fg_color="transparent")
-        topo_arquivos.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 0))
-        topo_arquivos.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            topo_arquivos,
-            text="📦 Arquivos de histórico",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color=TEMA["text"],
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            topo_arquivos,
-            text="Selecione um arquivo para o abrir ou eliminar com confirmação.",
-            font=ctk.CTkFont(size=11),
-            text_color=TEMA["muted"],
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-        table_arquivos = ctk.CTkFrame(painel_arquivos, fg_color="transparent")
-        table_arquivos.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
-        table_arquivos.grid_columnconfigure(0, weight=1)
-        table_arquivos.grid_rowconfigure(0, weight=1)
-
-        cols = ("arquivo", "data")
-
-        self.tree_arquivos = ttk.Treeview(
-            table_arquivos,
-            columns=cols,
-            show="headings",
-            style="Academia.Treeview",
-        )
-
-        self.tree_arquivos.heading("arquivo", text="Arquivo")
-        self.tree_arquivos.heading("data", text="Data")
-
-        self.tree_arquivos.column("arquivo", width=260)
-        self.tree_arquivos.column("data", width=150, anchor="center")
-
-        scroll = ctk.CTkScrollbar(table_arquivos, command=self.tree_arquivos.yview)
-
-        self.tree_arquivos.configure(yscrollcommand=scroll.set)
-
-        self.tree_arquivos.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-            padx=(0, 8),
-            pady=4,
-        )
-        scroll.grid(row=0, column=1, sticky="ns", pady=4)
-
         return frame
 
-    def _carregar_historico(self):
-
+    def _atualizar_logs_administracao(self):
         self.txt_historico.configure(state="normal")
         self.txt_historico.delete("1.0", "end")
 
-        if os.path.exists(ARQUIVO_LOG):
-
-            with open(
-                ARQUIVO_LOG,
-                "r",
-                encoding="utf-8"
-            ) as ficheiro:
-
-                linhas = ficheiro.readlines()
-
-                texto = ""
-
-                for linha in linhas:
-
-                    linha = linha.strip()
-
-                    if not linha:
-                        continue
-
-                    partes = linha.split(" - ", 1)
-
-                    if len(partes) == 2:
-
-                        data = partes[0]
-                        evento = partes[1]
-
-                        texto += (
-                            f"📅 {data}\n"
-                            f"└── {evento}\n"
-                            f"\n"
-                            f"{'─'*60}\n\n"
-                        )
-
-                    else:
-
-                        texto += linha + "\n"
-
-                self.txt_historico.insert(
-                    "1.0",
-                    texto
-                )
-    def _carregar_arquivos_historico(self):
-
-        pasta = PASTA_ARQUIVOS
-
-        for item in self.tree_arquivos.get_children():
-            self.tree_arquivos.delete(item)
-
-
-        if not os.path.exists(pasta):
-            return
-
-
-        arquivos = os.listdir(pasta)
-
-
-        for arquivo in arquivos:
-
-            if arquivo.endswith(".txt"):
-
-                data = arquivo.replace(
-                    "historico_",
-                    ""
-                ).replace(
-                    ".txt",
-                    ""
-                )
-
-                self.tree_arquivos.insert(
-                    "",
-                    "end",
-                    values=(
-                        arquivo,
-                        data.replace("_", " ")
-                    )
-                )
-
-    def _abrir_historico(self):
-
-        selecionado = self.tree_arquivos.selection()
-
-        if not selecionado:
-            messagebox.showinfo(
-                "Arquivo",
-                "Selecione um histórico arquivado."
-            )
-            return
-
-        valores = self.tree_arquivos.item(
-            selecionado[0],
-            "values"
-        )
-
-        arquivo = valores[0]
-
-        caminho = os.path.join(PASTA_ARQUIVOS, arquivo)
-
-        if os.path.exists(caminho):
-
-            with open(
-                caminho,
-                "r",
-                encoding="utf-8"
-            ) as ficheiro:
-
-                conteudo = ficheiro.read()
-
-            self.txt_historico.configure(state="normal")
-            self.txt_historico.delete("1.0", "end")
-            self.txt_historico.insert(
-                "1.0",
-                conteudo
-            )
-
+        tipo = self.log_filtro_var.get()
+        if tipo == "todos":
+            logs = acessos.todos_logs()
         else:
-            messagebox.showerror(
-                "Erro",
-                "Arquivo não encontrado."
+            logs = acessos.listar_administracao() if tipo == "administracao" \
+                else get_logs_por_tipo(tipo)
+
+        texto = ""
+        for log in logs:
+            texto += (
+                f"📅 {log['data']}\n"
+                f"└── [{log['tipo']}] {log['evento']}\n"
+                f"\n"
+                f"{'─' * 60}\n\n"
             )
 
-    def _arquivar_historico(self):
-        from datetime import datetime
-        confirmar = messagebox.askyesno(
-            "Arquivar histórico",
-            "Deseja arquivar o histórico atual?\n\n"
-            "Depois de arquivado, o histórico atual será limpo."
-        )
+        if not texto:
+            texto = "Sem registos para o tipo selecionado."
 
-        if not confirmar:
+        self.txt_historico.insert("1.0", texto)
+        self.txt_historico.configure(state="disabled")
+
+    def _apagar_logs_administracao(self):
+        if not self.admin:
             return
-
-        pasta = PASTA_ARQUIVOS
-
-        os.makedirs(
-            pasta,
-            exist_ok=True
-        )
-
-        data = datetime.now().strftime(
-            "%Y-%m-%d_%H-%M-%S"
-        )
-
-        destino = os.path.join(
-            pasta,
-            f"historico_{data}.txt"
-        )
-
-        with open(
-            ARQUIVO_LOG,
-            "r",
-            encoding="utf-8"
-        ) as origem:
-            conteudo = origem.read()
-
-        with open(
-            destino,
-            "w",
-            encoding="utf-8"
-        ) as arquivo:
-            arquivo.write(conteudo)
-
-        with open(
-            ARQUIVO_LOG,
-            "w",
-            encoding="utf-8"
-        ) as origem:
-            origem.write("")
-
-        self._carregar_historico()
-
-        messagebox.showinfo(
-            "Histórico",
-            "Histórico arquivado com sucesso."
-        )
-
-    def _excluir_historico(self):
-
-        from tkinter import simpledialog
-
-        selecionado = self.tree_arquivos.selection()
-
-        if not selecionado:
-            messagebox.showinfo(
-                "Excluir histórico",
-                "Selecione um arquivo de histórico."
-            )
+        if not self._pedir_senha_admin(
+            "Apagar logs",
+            "Deseja apagar TODOS os logs do sistema (administração, presenças, "
+            "pagamentos, alunos, funcionários e gerais)?\n\n"
+            "Introduza a palavra-passe do administrador para confirmar.",
+        ):
             return
+        from projeto_ginasio.db_adapter import limpar_todos_logs
+        limpar_todos_logs()
+        self._atualizar_logs_administracao()
+        messagebox.showinfo("Sucesso", "Todos os logs do sistema apagados.")
 
-        senha = simpledialog.askstring(
-            "Confirmação",
-            "Introduza a palavra-passe do administrador:",
-            show="*"
-        )
-
-        if senha is None:
-            return
-
-        if senha != self.utilizador["senha"]:
-            messagebox.showerror(
-                "Erro",
-                "Palavra-passe incorreta."
-            )
-            return
-
-        valores = self.tree_arquivos.item(
-            selecionado[0],
-            "values"
-        )
-
-        arquivo = valores[0]
-
-        confirmar = messagebox.askyesno(
-            "Confirmar exclusão",
-            f"Tem a certeza que pretende eliminar o arquivo:\n\n{arquivo}?"
-        )
-
-        if not confirmar:
-            return
-
-        caminho = os.path.join(PASTA_ARQUIVOS, arquivo)
-
-        try:
-            os.remove(caminho)
-
-            self._carregar_arquivos_historico()
-
-            messagebox.showinfo(
-                "Sucesso",
-                "Arquivo eliminado com sucesso."
-            )
-
-        except Exception as erro:
-            messagebox.showerror(
-                "Erro",
-                str(erro)
-            )
+    def _carregar_logs_administracao(self):
+        self._atualizar_logs_administracao()
 
 
 if __name__ == "__main__":

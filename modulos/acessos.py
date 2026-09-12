@@ -1,219 +1,61 @@
-import json
-import os
-import logging
+"""Gestão de logs/registos do sistema — baseados na tabela SQLite 'logs'.
+
+Todos os registos (presenças, pagamentos, alunos, funcionários, acesso/adm)
+são guardados numa única fonte de dados: a tabela 'logs', identificados pela
+coluna 'tipo'. Este módulo apenas fornece facilitadores de leitura e limpeza.
+O Histórico de Acessos separado foi removido.
+"""
 from datetime import datetime
-from projeto_ginasio.config import DADOS
 
-PASTA_DADOS = DADOS
-
-os.makedirs(PASTA_DADOS, exist_ok=True)
-
-ARQUIVO_ACESSOS = os.path.join(
-    PASTA_DADOS,
-    "historico_acessos.json"
+from projeto_ginasio.db_adapter import (
+    get_logs_por_tipo,
+    get_logs,
+    limpar_logs_por_tipo,
 )
 
-ARQUIVO_LOG = os.path.join(
-    PASTA_DADOS,
-    "logs.txt"
-)
-
-logging.basicConfig(
-
-    filename=ARQUIVO_LOG,
-
-    level=logging.INFO,
-
-    format="%(asctime)s - %(message)s"
-
-)
 
 def data_atual():
+    return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-    return datetime.now().strftime(
-        "%d/%m/%Y %H:%M:%S"
-    )
 
-# HISTÓRICO
-# ==========================
-def carregar_historico():
+# LOGS DE ADMINISTRAÇÃO / ACESSOS
+# ================================
+def listar_administracao(limite=None):
+    """Devolve os logs de administração/acessos (login, logout, permissões,
+    apagar históricos, etc.)."""
+    return get_logs_por_tipo("administracao", limite=limite)
 
-    if not os.path.exists(ARQUIVO_ACESSOS):
-        return []
 
-    try:
+# ARQUIVO DE PRESENÇAS (histórico permanente)
+# ============================================
+def arquivo_presencas(limite=None):
+    """Devolve o histórico permanente das presenças, obtido exclusivamente
+    a partir dos Logs do tipo 'presenca'."""
+    return get_logs_por_tipo("presenca", limite=limite)
 
-        with open(
-            ARQUIVO_ACESSOS,
-            "r",
-            encoding="utf-8"
-        ) as f:
 
-            return json.load(f)
+def apagar_arquivo_presencas():
+    """Apaga permanentemente o histórico de presenças (apenas administrador).
 
-    except:
+    Como o histórico diário guarda apenas as entradas do dia atual (nas
+    presenças do sistema) e o histórico permanente fica nos Logs, apagar o
+    arquivo de presenças também limpa as presenças do dia atual."""
+    from modulos import presencas
+    from projeto_ginasio.db_adapter import limpar_presencas_anteriores
+    limpar_logs_por_tipo("presenca")
+    # Limpar também as presenças do dia atual (tabela e lista em memória)
+    hoje = datetime.now().strftime("%d/%m/%Y")
+    limpar_presencas_anteriores(hoje)
+    with presencas._presencas_lock:
+        presencas.presencas[:] = []
 
-        return []
 
+# LOGS GERAIS
+# ================================
+def todos_logs(limite=1000):
+    return get_logs()[:limite] if limite else get_logs()
 
-def guardar_historico(lista):
 
-    with open(
-        ARQUIVO_ACESSOS,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            lista,
-            f,
-            indent=4,
-            ensure_ascii=False
-        )
-
-
-def guardar_evento(
-
-    utilizador,
-    estado
-
-):
-
-    historico = carregar_historico()
-
-    historico.append({
-
-        "utilizador": utilizador,
-
-        "estado": estado,
-
-        "data": data_atual()
-
-    })
-
-    guardar_historico(historico)
-
-    logging.info(
-        f"{estado} - {utilizador}"
-    )
-
-
-def registar_login(usuario):
-
-    guardar_evento(
-        usuario,
-        "LOGIN"
-    )
-
-
-def registar_logout(usuario):
-
-    guardar_evento(
-        usuario,
-        "LOGOUT"
-    )
-
-
-def registar_acesso(
-
-    usuario,
-    autorizado
-
-):
-
-    estado = (
-        "AUTORIZADO"
-        if autorizado
-        else
-        "NEGADO"
-    )
-
-    guardar_evento(
-        usuario,
-        estado
-    )
-
-def listar_historico():
-
-    return carregar_historico()
-
-def listar_historico_utilizador(nome):
-
-    return [
-
-        h
-
-        for h in carregar_historico()
-
-        if h["utilizador"] == nome
-
-    ]
-
-def limpar_historico():
-
-    guardar_historico([])
-
-    logging.info(
-        "Histórico apagado."
-    )
-
-def limpar_logs():
-
-    with open(
-        ARQUIVO_LOG,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        pass
-
-    logging.info(
-        "Logs apagados."
-    )
-
-# ESTATÍSTICAS
-# ==========================
-def obter_estatisticas():
-
-    historico = listar_historico()
-
-    logins = 0
-    logouts = 0
-    autorizados = 0
-    negados = 0
-
-    for evento in historico:
-
-        estado = evento["estado"]
-
-        if estado == "LOGIN":
-            logins += 1
-
-        elif estado == "LOGOUT":
-            logouts += 1
-
-        elif estado == "AUTORIZADO":
-            autorizados += 1
-
-        elif estado == "NEGADO":
-            negados += 1
-
-    return {
-
-        "logins": logins,
-
-        "logouts": logouts,
-
-        "autorizados": autorizados,
-
-        "negados": negados,
-
-        "total_eventos": len(historico)
-
-    }
-
-def inicializar():
-
-    logging.info(
-        "Sistema de acessos iniciado."
-    )
+def obter_tipos():
+    from projeto_ginasio.db_adapter import get_tipos_logs
+    return get_tipos_logs()

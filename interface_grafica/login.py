@@ -1,7 +1,7 @@
 import customtkinter as ctk
 from tkinter import messagebox
 
-from modulos.autenticacao import autenticar
+from modulos.autenticacao import autenticar, e_admin_temporario
 from interface_grafica.constants import TEMA
 from interface_grafica.widgets import btn_primary, styled_entry, SurfaceCard
 
@@ -123,6 +123,17 @@ class LoginWindow(ctk.CTk):
             else:
                 messagebox.showerror("Erro", mensagem)
             return
+
+        if e_admin_temporario(utilizador):
+            messagebox.showwarning(
+                "Administrador Temporário",
+                "Está a usar o administrador temporário\n"
+                "(usuário: adm / palavra-passe: adm).\n\n"
+                "Por segurança, ALTERE OS DADOS desta conta "
+                "temporária (menu Funcionários) ou CRIE OUTRA "
+                "conta de administrador definitiva e elimine a "
+                "conta temporária o quanto antes."
+            )
 
         self.utilizador_autenticado = utilizador
         self.destroy()

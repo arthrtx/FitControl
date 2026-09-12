@@ -1,4 +1,28 @@
+# Ambientes e interpretadores
 .venv/
+venv/
+
+# Ficheiros compilados / cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd.pdb
+
+# Dados locais (base de dados e ficheiros do utilizador)
+projeto_ginasio/dados/
+*.db
+*.db-journal
+*.log
+config_camera.json
+
+# Edições e IDEs
 .vscode/
+.idea/
+
+# Empacotamento (PyInstaller)
+build/
+dist/
+*.spec
+
+# Scripts de desenvolvimento
+check_db.py

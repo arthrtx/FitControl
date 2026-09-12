@@ -1,52 +1,46 @@
-import json
-import os
+import threading
 from datetime import datetime
 
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import presencas, alunos
+from projeto_ginasio.db_adapter import (
+    add_presenca,
+    save_presencas,
+    get_presencas_dia,
+    limpar_presencas_anteriores,
+)
 from modulos.gestao_alunos import escrever_log
+
+# A lista `presencas` é partilhada entre a interface (thread principal) e o
+# Face ID (thread em segundo plano). Sem este lock, uma leitura na interface
+# ao mesmo tempo que uma escrita do Face ID pode causar erros intermitentes
+# ou dados corrompidos.
+_presencas_lock = threading.Lock()
 
 
 # guardar presenças
 # ======================================================
 def guardar_presencas():
     try:
-        with open(ARQUIVO_PRESENCAS, "w", encoding="utf-8") as ficheiro:
-            json.dump(presencas, ficheiro, indent=4, ensure_ascii=False)
-
+        with _presencas_lock:
+            save_presencas(presencas)
     except Exception as erro:
-        raise Exception(
-            f"Não foi possível guardar as presenças: {erro}"
-        )
+        raise Exception(f"Não foi possível guardar as presenças: {erro}")
 
 
-# carregar presenças
+# carregar presenças (histórico diário)
 # ======================================================
 def carregar_presencas():
-
-    if not os.path.exists(ARQUIVO_PRESENCAS):
-
-        presencas.clear()
-
-        guardar_presencas()
-
-        return
-
+    """Limpa as presenças de dias anteriores da tabela e carrega apenas as
+    entradas do dia atual. As presenças antigas permanecem registadas nos
+    Logs (tipo 'presenca')."""
     try:
-
-        with open(ARQUIVO_PRESENCAS, "r", encoding="utf-8") as ficheiro:
-
-            dados = json.load(ficheiro)
-
-            presencas.clear()
-
-            presencas.extend(dados)
-
+        hoje = datetime.now().strftime("%d/%m/%Y")
+        limpar_presencas_anteriores(hoje)
+        with _presencas_lock:
+            presencas[:] = get_presencas_dia(hoje)
     except Exception as erro:
-
-        raise Exception(
-            f"Não foi possível carregar as presenças: {erro}"
-        )
+        raise Exception(f"Não foi possível carregar as presenças: {erro}")
 
 
 # registar presenças
@@ -66,14 +60,6 @@ def registar_presenca(id_aluno):
 
     hoje = datetime.now().strftime("%d/%m/%Y")
 
-    # Verificar se já existe presença hoje
-    for presenca in presencas:
-        if (
-            presenca["id_aluno"] == id_aluno and
-            presenca["data"] == hoje
-        ):
-            return "PRESENCA_JA_REGISTADA"
-
     agora = datetime.now()
 
     presenca = {
@@ -82,9 +68,9 @@ def registar_presenca(id_aluno):
         "hora": agora.strftime("%H:%M")
     }
 
-    presencas.append(presenca)
-
-    guardar_presencas()
+    with _presencas_lock:
+        add_presenca(presenca)
+        presencas.append(presenca)
 
     nome_aluno = ""
 
@@ -94,7 +80,8 @@ def registar_presenca(id_aluno):
             break
 
     escrever_log(
-        f"Entrada do aluno '{nome_aluno}'."
+        f"Entrada do aluno '{nome_aluno}'.",
+        tipo="presenca"
     )
 
     return "OK"

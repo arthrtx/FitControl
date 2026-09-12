@@ -1,63 +1,30 @@
-import json
-import os
 from datetime import datetime, timedelta
 
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import pagamentos, alunos
+from projeto_ginasio.db_adapter import (
+    save_pagamentos,
+    add_pagamento,
+    apagar_historico_pagamentos,
+    delete_pagamento,
+)
 from modulos.gestao_alunos import escrever_log
 
 
 # guardar pagamentos
 # ======================================================
 def guardar_pagamentos():
-
     try:
-
-        with open(ARQUIVO_PAGAMENTOS, "w", encoding="utf-8") as ficheiro:
-
-            json.dump(
-                pagamentos,
-                ficheiro,
-                indent=4,
-                ensure_ascii=False
-            )
-
+        save_pagamentos(pagamentos)
     except Exception as erro:
-
-        raise Exception(
-            f"Não foi possível guardar os pagamentos: {erro}"
-        )
+        raise Exception(f"Não foi possível guardar os pagamentos: {erro}")
 
 
 # carregar pagamentos
 # ======================================================
 def carregar_pagamentos():
-
-    if not os.path.exists(ARQUIVO_PAGAMENTOS):
-
-        pagamentos.clear()
-
-        guardar_pagamentos()
-
-        return
-
-
-    try:
-
-        with open(ARQUIVO_PAGAMENTOS, "r", encoding="utf-8") as ficheiro:
-
-            dados = json.load(ficheiro)
-
-            pagamentos.clear()
-
-            pagamentos.extend(dados)
-
-
-    except Exception as erro:
-
-        raise Exception(
-            f"Não foi possível carregar os pagamentos: {erro}"
-        )
+    # Dados agora são carregados do banco de dados em dados.py
+    pass
 
 
 # registar pagamentos
@@ -139,11 +106,9 @@ def registar_pagamento(id_aluno, valor):
 
     }
 
-
+    novo_id = add_pagamento(pagamento)
+    pagamento["id"] = novo_id
     pagamentos.append(pagamento)
-
-
-    guardar_pagamentos()
 
     nome_aluno = ""
 
@@ -152,11 +117,51 @@ def registar_pagamento(id_aluno, valor):
             nome_aluno = aluno["nome"]
             break
     escrever_log(
-         f"Pagamento registado para o aluno '{nome_aluno}'."
+         f"Pagamento registado para o aluno '{nome_aluno}'.",
+         tipo="pagamento"
     )
 
 
     return True
+
+
+# apagar um pagamento específico
+# ======================================================
+def eliminar_pagamento(id_pagamento):
+    """Apaga um pagamento individual. Deve ser usado apenas por
+    administradores."""
+    if not id_pagamento:
+        return False
+    encontrado = None
+    for pagamento in pagamentos:
+        if pagamento.get("id") == id_pagamento:
+            encontrado = pagamento
+            break
+    if not encontrado:
+        return False
+    delete_pagamento(id_pagamento)
+    pagamentos.remove(encontrado)
+    escrever_log(
+        f"Pagamento apagado (ID {id_pagamento}).",
+        tipo="administracao"
+    )
+    return True
+
+
+# apagar histórico de pagamentos
+# ======================================================
+def apagar_historico():
+    """Apaga todo o histórico de pagamentos. Deve ser usado apenas por
+    administradores."""
+    global pagamentos
+    total = len(pagamentos)
+    apagar_historico_pagamentos()
+    pagamentos.clear()
+    escrever_log(
+        f"Histórico de pagamentos apagado ({total} registos).",
+        tipo="administracao"
+    )
+    return total
 
 
 

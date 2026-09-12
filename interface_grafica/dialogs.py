@@ -60,7 +60,7 @@ class AlunoFormDialog(_FormDialogBase):
         self.callback = callback
         self.aluno = aluno
 
-        card = self._setup_window(master, titulo, 500, 460)
+        card = self._setup_window(master, titulo, 550, 550)
 
         ctk.CTkLabel(
             card,
@@ -69,11 +69,22 @@ class AlunoFormDialog(_FormDialogBase):
             text_color=TEMA["text"],
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(16, 8))
 
+        # Regras de validação colocadas dentro de cada campo (placeholder com
+        # opacidade baixa, que desaparece assim que o utilizador escreve).
+        placeholders = {
+            "nome": "Mínimo 2 palavras (nome e apelido)",
+            "telemovel": "9 dígitos (ex.: 912345678)",
+            "documento": "Máximo 12 caracteres",
+        }
         self.entries = {}
         for i, (rotulo, chave) in enumerate(
             [("Nome", "nome"), ("Telemóvel", "telemovel"), ("Documento", "documento")], start=1
         ):
-            entry = styled_entry(card)
+            entry = styled_entry(
+                card,
+                placeholder_text=placeholders.get(chave, ""),
+                placeholder_text_color=TEMA["muted"],
+            )
             self._campo(card, i, rotulo, entry)
             self.entries[chave] = entry
 
@@ -88,13 +99,15 @@ class AlunoFormDialog(_FormDialogBase):
             self.plano_var.set(aluno["plano"])
             aviso = "A foto não será alterada na edição."
         else:
-            aviso = "Ao guardar, a câmara abrirá para tirar a fotografia."
+            aviso = "Ao guardar, abre-se uma janela da câmara: centre o rosto e pressione P para tirar a foto (ou Q para cancelar)."
 
         ctk.CTkLabel(
             card,
             text=aviso,
             text_color=TEMA["muted"],
             font=ctk.CTkFont(size=11),
+            wraplength=490,
+            justify="left",
         ).grid(row=5, column=0, columnspan=2, padx=16, pady=(0, 4))
 
         self._botoes(card, 6, self._guardar)
@@ -106,8 +119,37 @@ class AlunoFormDialog(_FormDialogBase):
         documento = self.entries["documento"].get().strip()
         plano = self.plano_var.get()
 
-        if not nome or not telemovel or not documento:
-            messagebox.showwarning("Campos obrigatórios", "Preencha todos os campos.")
+        # Validação do nome
+        if not nome:
+            messagebox.showwarning("Nome inválido", "O nome não pode estar vazio.")
+            return
+        if len(nome.split()) < 2:
+            messagebox.showwarning("Nome inválido", "O nome deve conter pelo menos 2 palavras (nome e sobrenome).")
+            return
+
+        # Validação do telemóvel
+        if not telemovel:
+            messagebox.showwarning("Telemóvel inválido", "O telemóvel não pode estar vazio.")
+            return
+        if not telemovel.isdigit():
+            messagebox.showwarning("Telemóvel inválido", "O telemóvel deve conter apenas dígitos numéricos.")
+            return
+        if len(telemovel) != 9:
+            messagebox.showwarning("Telemóvel inválido", "O telemóvel deve ter exatamente 9 dígitos.")
+            return
+
+        # Validação do documento
+        if not documento:
+            messagebox.showwarning("Documento inválido", "O documento não pode estar vazio.")
+            return
+        if len(documento) > 12:
+            messagebox.showwarning("Documento inválido", "O documento não pode ter mais de 12 caracteres.")
+            return
+
+        # Validação do plano
+        planos_validos = ["Diário", "Mensal", "Trimestral", "Anual"]
+        if plano not in planos_validos:
+            messagebox.showwarning("Plano inválido", f"O plano deve ser um dos seguintes: {', '.join(planos_validos)}.")
             return
 
         self.callback(nome, telemovel, documento, plano)

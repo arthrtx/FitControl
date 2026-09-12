@@ -1,14 +1,55 @@
 import cv2
 import json
 import os
+import shutil
+import sys
 import threading
 import time
 
 import insightface
 import numpy as np
 
-from projeto_ginasio.config import ARQUIVO
+from projeto_ginasio.config import RESOURCE_ROOT
 from modulos.presencas import registar_presenca
+
+
+def _obter_root_modelos():
+    """Devolve a pasta raiz do insightface com os modelos faciais.
+
+    Em executável congelado usa os modelos empacotados no _internal,
+    para funcionar sem internet em qualquer máquina. Em ambiente de
+    desenvolvimento usa o folder padrão ~/.insightface.
+    """
+    if getattr(sys, "frozen", False):
+        raiz = os.path.join(RESOURCE_ROOT, "insightface_models")
+        if os.path.isdir(os.path.join(raiz, "models", "buffalo_l")):
+            return raiz
+    return "~/.insightface"
+
+
+def _garantir_dados_insightface():
+    """O insightface assume PyInstaller onefile: o get_object/get_image
+    procuram meanshape_68.pkl e máscaras diretamente em _MEIPASS/objects e
+    _MEIPASS/images. No build onedir esses dados ficam em
+    _MEIPASS/insightface/data/{objects,images}, pelo que a procura falha e o
+    lançamento do modelo de marcos termina com AttributeError. Esta função
+    copia os dados para o local esperado antes do modelo ser carregado."""
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        origem = os.path.join(RESOURCE_ROOT, "insightface", "data")
+        destino_objects = os.path.join(RESOURCE_ROOT, "objects")
+        if not os.path.isdir(destino_objects):
+            fonte = os.path.join(origem, "objects")
+            if os.path.isdir(fonte):
+                shutil.copytree(fonte, destino_objects)
+        destino_images = os.path.join(RESOURCE_ROOT, "images")
+        if not os.path.isdir(destino_images):
+            fonte = os.path.join(origem, "images")
+            if os.path.isdir(fonte):
+                shutil.copytree(fonte, destino_images)
+    except Exception as erro:
+        print(f"Aviso: não foi possível preparar os dados do insightface: {erro}")
 
 
 modelo_face = None
@@ -21,8 +62,10 @@ _estado_lock = threading.Lock()
 _estado_reconhecimento = {
     "estado": "parado",
     "titulo": "Face ID inativo",
-    "detalhe": "Abra a página Presenças para iniciar o reconhecimento facial.",
+    "detalhe": "Clique no botão 'Iniciar Face ID' para começar o reconhecimento facial.\n"
+               "Pressione Q na janela do Face ID para fechar o módulo.",
 }
+_presencas_registadas_counter = 0
 
 
 def carregar_modelo():
@@ -30,6 +73,7 @@ def carregar_modelo():
     global modelo_face
 
     if modelo_face is None:
+        _garantir_dados_insightface()
         _atualizar_estado(
             "a_iniciar",
             "A iniciar Face ID",
@@ -37,7 +81,9 @@ def carregar_modelo():
         )
         print("A carregar modelo facial...")
 
-        modelo_face = insightface.app.FaceAnalysis()
+        modelo_face = insightface.app.FaceAnalysis(
+            root=_obter_root_modelos()
+        )
         modelo_face.prepare(
             ctx_id=-1,
             det_size=(320, 320)
@@ -67,48 +113,46 @@ def obter_estado_reconhecimento():
         return dict(_estado_reconhecimento)
 
 
-def parar_reconhecimento():
+def obter_novas_presencas():
+    """Retorna True se uma presença foi registada desde a última chamada."""
+    global _presencas_registadas_counter
+    with _estado_lock:
+        counter = _presencas_registadas_counter
+    return counter
 
-    global _camera_ativa
+
+def parar_reconhecimento():
+    """Sinaliza ao thread do Face ID para parar.
+
+    Importante: esta função pode ser chamada a partir do thread principal
+    da interface, enquanto o thread do Face ID pode estar, nesse preciso
+    momento, dentro de um camera.read(). Libertar ou mexer no objeto
+    VideoCapture (ou nas janelas do OpenCV) a partir de outro thread nessa
+    altura é o que causava os crashes/bloqueios ao alternar entre Presenças
+    e Câmara. Por isso aqui apenas assinalamos o pedido de paragem — quem
+    efetivamente liberta a câmera e fecha a janela é sempre o próprio
+    thread do reconhecimento, no seu bloco `finally`. Quem chama esta
+    função deve depois esperar (join) pelo thread antes de voltar a usar a
+    câmera — ver `parar_face_id` em interface_grafica/app.py.
+    """
 
     _reconhecimento_stop_event.set()
 
-    if _camera_ativa is not None:
-        try:
-            _camera_ativa.release()
-        except Exception:
-            pass
-        finally:
-            _camera_ativa = None
-
-    try:
-        cv2.destroyWindow(_janela_face_id)
-    except Exception:
-        pass
-
     _atualizar_estado(
-        "parado",
-        "Face ID inativo",
-        "Reconhecimento facial parado."
+        "a_parar",
+        "A parar Face ID",
+        "A libertar a câmera..."
     )
 
 
 def carregar_alunos():
 
-    if not os.path.exists(ARQUIVO):
-        return []
-
     try:
-        with open(
-            ARQUIVO,
-            "r",
-            encoding="utf-8"
-        ) as ficheiro:
-            return json.load(ficheiro)
-
+        from projeto_ginasio.db_adapter import get_alunos
+        return get_alunos()
     except Exception as erro:
         print(
-            f"Erro ao carregar alunos: {erro}"
+            f"Erro ao carregar alunos do banco de dados: {erro}"
         )
         return []
 
@@ -158,6 +202,7 @@ def iniciar_reconhecimento():
 
     global _reconhecimento_em_execucao
     global _camera_ativa
+    global _presencas_registadas_counter
 
     with _reconhecimento_lock:
         if _reconhecimento_em_execucao:
@@ -196,7 +241,8 @@ def iniciar_reconhecimento():
             _atualizar_estado(
                 "sem_alunos",
                 "Sem embeddings registados",
-                "Nenhum aluno com reconhecimento facial cadastrado."
+                "Nenhum aluno com reconhecimento facial cadastrado.\n"
+                "Crie um aluno com foto para ativar o Face ID."
             )
             return
 
@@ -233,10 +279,12 @@ def iniciar_reconhecimento():
         ultimo_processamento = 0
         intervalo_ia = 0.5
         presencas_recentes = {}
+        ultimo_nome_reconhecido = None
+        tempo_ultimo_reconhecimento = 0
         _atualizar_estado(
             "ativo",
             "Face ID ativo",
-            "A procurar rostos na webcam."
+            "A procurar rostos na webcam.\nPressione Q na janela do Face ID para fechar."
         )
 
         while not _reconhecimento_stop_event.is_set():
@@ -251,7 +299,7 @@ def iniciar_reconhecimento():
 
             agora = time.time()
             nome = "Desconhecido"
-            detalhe_estado = "A procurar rostos na webcam."
+            detalhe_estado = "A procurar rostos na webcam.\nPressione Q para fechar."
 
             if agora - ultimo_processamento >= intervalo_ia:
                 ultimo_processamento = agora
@@ -260,14 +308,22 @@ def iniciar_reconhecimento():
                     frame,
                     (320, 320)
                 )
-                rostos = ia.get(
-                    pequeno
-                )
+                try:
+                    rostos = ia.get(
+                        pequeno
+                    ) or []
+                except Exception as erro_ia:
+                    print(
+                        f"Erro momentâneo na deteção facial: {erro_ia}"
+                    )
+                    rostos = []
 
                 if rostos:
                     detalhe_estado = "Rosto detetado, a validar identidade."
 
                 for rosto in rostos:
+                    if rosto.embedding is None:
+                        continue
                     aluno = reconhecer_rosto(
                         rosto.embedding,
                         alunos
@@ -277,24 +333,40 @@ def iniciar_reconhecimento():
                         nome = aluno["nome"]
                         id_aluno = aluno["id"]
 
+                        ultimo_nome_reconhecido = nome
+                        tempo_ultimo_reconhecimento = agora
+
                         ultima = presencas_recentes.get(
                             id_aluno
                         )
 
                         if not ultima or agora - ultima > 60:
-                            resultado = registar_presenca(
-                                id_aluno
-                            )
-                            print(
-                                f"{nome} -> {resultado}"
-                            )
-                            presencas_recentes[
-                                id_aluno
-                            ] = agora
+                            try:
+                                resultado = registar_presenca(
+                                    id_aluno
+                                )
+                                print(
+                                    f"{nome} -> {resultado}"
+                                )
+                            except Exception as erro_presenca:
+                                print(
+                                    f"Erro ao registar presença de {nome}: {erro_presenca}"
+                                )
+                                resultado = "ERRO_AO_GRAVAR"
+
+                            if resultado != "ERRO_AO_GRAVAR":
+                                presencas_recentes[
+                                    id_aluno
+                                ] = agora
+
                             if resultado == "OK":
                                 detalhe_estado = f"Presença registada para {nome}."
+                                with _estado_lock:
+                                    _presencas_registadas_counter += 1
                             elif resultado == "PRESENCA_JA_REGISTADA":
                                 detalhe_estado = f"{nome} já tem presença registada hoje."
+                            elif resultado == "ERRO_AO_GRAVAR":
+                                detalhe_estado = f"{nome} identificado, mas houve um erro ao gravar a presença. A tentar novamente."
                             else:
                                 detalhe_estado = f"{nome} identificado, resultado: {resultado}."
                         else:
@@ -304,6 +376,10 @@ def iniciar_reconhecimento():
 
                 if nome == "Desconhecido" and rostos:
                     detalhe_estado = "Rosto não reconhecido."
+
+            if nome == "Desconhecido" and ultimo_nome_reconhecido and (agora - tempo_ultimo_reconhecimento) < 2:
+                nome = ultimo_nome_reconhecido
+                detalhe_estado = f"{nome} reconhecido."
 
             estado_atual = "ativo" if nome != "Desconhecido" else "desconhecido"
             titulo_atual = f"Reconhecido: {nome}" if nome != "Desconhecido" else "Desconhecido"
@@ -362,5 +438,6 @@ def iniciar_reconhecimento():
         _atualizar_estado(
             "parado",
             "Face ID inativo",
-            "Abra a página Presenças para voltar a iniciar o reconhecimento facial."
+            "Clique no botão 'Iniciar Face ID' para voltar a iniciar o reconhecimento facial.\n"
+            "Pressione Q na janela do Face ID para fechar o módulo."
         )
