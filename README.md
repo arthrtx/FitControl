@@ -14,6 +14,31 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 - Reconhecimento facial (Face ID) com modelo embutido (funciona offline).
 - Base de dados SQLite (auto-criada e vazia na primeira execução).
 
+## Novidades
+
+### Atualização de etiquetas e PDF
+
+- **Relatório PDF redesenhado**: cabeçalho, cartões de resumo, tabelas, paginação e rodapé reorganizados para leitura mais clara. O botão **Gerar Relatório PDF** passou a usar o estilo primário da aplicação.
+- **Relatórios agrupados por plano**: para além do total de alunos, o PDF apresenta agora o valor médio pago por plano.
+- **Pesquisa de pagamentos apenas por nome**: o campo **Pesquisar aluno pelo nome...** filtra somente pelo nome do aluno. O documento, telemóvel e ID deixaram de ser usados na pesquisa.
+
+### Melhorias de interface
+
+- **Atualização manual do dashboard**: o botão `↻` entre o relógio e o botão de tema permite recarregar cartões e gráficos sem recarregar a aplicação.
+- **Dashboard mais completo**: 7 cartões de indicadores e 4 gráficos.
+
+### Alunos e fotografia
+
+- **Atualização de foto na edição**: ao editar um aluno é possível marcar a caixa **📷 Tirar nova foto ao guardar** para capturar uma nova fotografia pela câmera. A referência facial é recalculada e guardada automaticamente.
+- **Cancelamento sem perda**: se cancelar a captura da câmera, a foto existente é mantida e a edição continua normalmente.
+- **Foto apenas na edição**: criar um mantém o comportamento atual (tirar foto ao criar); a opção de troca de foto existe apenas no formulário de edição.
+
+### Correções de estabilidade
+
+- **Eliminação de alunos corrigida**: eliminar um aluno e movê-lo para o arquivo de exclusão já não bloqueia a aplicação. A causa era a reutilização de identificadores entre alunos ativos e arquivados, que gerava um conflito na base de dados e deixava a base bloqueada em todas as escritas seguintes.
+- **Identificadores únicos garantidos**: os novos alunos já não reaproveitam o número de um aluno que está no arquivo de exclusão.
+- **Erros visíveis**: se a eliminação falhar, é apresentada uma mensagem de erro em vez de a aplicação ficar aparentemente congelada.
+
 ## Novidades desta versão (Edição Portátil)
 
 - **Versão portátil pronta a usar**: o executável e todas as dependências (Python, OpenCV, modelo facial e bibliotecas) vêm já empacotados na pasta `_internal`. Basta extrair e executar `FitControl.exe` — **não requer instalação nem internet**.

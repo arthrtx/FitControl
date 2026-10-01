@@ -167,26 +167,33 @@ def apagar_historico():
 
 # verificar mensalidades
 # ======================================================
-def mensalidade_valida(id_aluno):
+def situacao_mensalidade(id_aluno):
 
     for pagamento in reversed(pagamentos):
 
         if pagamento["id_aluno"] == id_aluno:
 
+            vencimento = pagamento["data_vencimento"]
 
             if pagamento["plano"] == "Diário":
 
-                return pagamento["data_pagamento"] == datetime.now().strftime("%d/%m/%Y")
+                if pagamento["data_pagamento"] == datetime.now().strftime("%d/%m/%Y"):
+                    return ("paga", vencimento)
+
+                return ("atrasada", vencimento)
 
 
-            vencimento = datetime.strptime(
-                pagamento["data_vencimento"],
+            data_vencimento = datetime.strptime(
+                vencimento,
                 "%d/%m/%Y"
             )
 
 
-            return vencimento.date() >= datetime.now().date()
+            if data_vencimento.date() >= datetime.now().date():
+                return ("paga", vencimento)
+
+            return ("atrasada", vencimento)
 
 
 
-    return False
+    return ("sem_pagamento", "")

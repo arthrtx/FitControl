@@ -15,12 +15,19 @@ from PIL import Image
 import cv2 as cv
 
 from projeto_ginasio.dados import pagamentos as pagamentos_db, presencas as presencas_db
-from interface_grafica.constants import CORES, TEMA
-from interface_grafica.dialogs import AlunoFormDialog, FuncionarioFormDialog
-from interface_grafica.utils import aluno_por_id, nome_aluno, setup_paths
+from interface_grafica.constants import CORES, TEMA, alternar_tema, modo_tema
+from interface_grafica.dialogs import (
+    AlunoFormDialog,
+    FuncionarioFormDialog,
+    NotificacoesDialog,
+    RelatorioDialog,
+)
+from interface_grafica import relatorio_pdf
+from interface_grafica.utils import aluno_por_id, nome_aluno, sem_acentos, setup_paths
 from interface_grafica.widgets import (
     PageFrame,
     PageHeader,
+    Sino,
     SurfaceCard,
     TablePanel,
     btn_danger,
@@ -34,7 +41,7 @@ setup_paths()
 
 from projeto_ginasio.main import inicializar
 import projeto_ginasio.Camara
-from modulos import estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios, acessos
+from modulos import estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios, acessos, notificacoes, relatorios
 from projeto_ginasio.db_adapter import get_logs_por_tipo
 
 
@@ -332,12 +339,12 @@ class AcademiaApp(ctk.CTk):
         self.reabrir_login = False
         super().__init__()
 
-        ctk.set_appearance_mode("dark")
+        ctk.set_appearance_mode(modo_tema())
         ctk.set_default_color_theme("blue")
 
         self.title("FitControl — Gestão de Academia")
         self.geometry("1100x700")
-        self.minsize(900, 600)
+        self.minsize(900, 680)
         self.configure(fg_color=TEMA["bg"])
 
         inicializar()
@@ -347,16 +354,21 @@ class AcademiaApp(ctk.CTk):
         self._dashboard_job = None
         self._dashboard_clock_job = None
         self._dashboard_refresh_ms = 12000
+        self._sino_job = None
+        self._sino_refresh_ms = 60000
         self._face_id_thread = None
         self._face_id_start_job = None
         self._face_id_status_job = None
         self.cards = {}
         self._chart_panels = []
+        self.sino = Sino(self._abrir_notificacoes)
         self.protocol("WM_DELETE_WINDOW", self._fechar_aplicacao)
 
         self._criar_layout()
         self._configurar_treeview()
         self._mostrar_pagina("dashboard")
+        self._atualizar_sino()
+        self._agendar_sino()
 
     def iniciar_face_id(self):
         if self._pagina_atual != "presencas":
@@ -455,6 +467,40 @@ class AcademiaApp(ctk.CTk):
         for painel in self._chart_panels:
             painel.stop_animation()
 
+    def _agendar_sino(self):
+        self._cancelar_sino()
+        self._sino_job = self.after(self._sino_refresh_ms, self._auto_atualizar_sino)
+
+    def _cancelar_sino(self):
+        if self._sino_job:
+            self.after_cancel(self._sino_job)
+            self._sino_job = None
+
+    def _auto_atualizar_sino(self):
+        self._atualizar_sino()
+        self._agendar_sino()
+
+    def _atualizar_sino(self):
+        notificacoes.verificar()
+        self.sino.definir(notificacoes.por_ler())
+
+    def _abrir_notificacoes(self):
+        self._atualizar_sino()
+        NotificacoesDialog(self, ao_fechar=self._atualizar_sino)
+
+    def _abrir_relatorio(self):
+        RelatorioDialog(self, self._gerar_relatorio)
+
+    def _gerar_relatorio(self, ano, mes):
+        try:
+            dados = relatorios.dados_relatorio(ano, mes)
+            caminho = relatorio_pdf.gerar_relatorio(dados)
+            os.startfile(caminho)
+        except Exception as erro:
+            messagebox.showerror(
+                "Erro", f"Não foi possível gerar o relatório:\n{erro}"
+            )
+
     def _atualizar_estado_face_id(self):
         if self._pagina_atual != "presencas":
             self._cancelar_estado_face_id()
@@ -509,10 +555,42 @@ class AcademiaApp(ctk.CTk):
         self._cancelar_atualizacao_dashboard()
         self._cancelar_relogio_dashboard()
         self._cancelar_estado_face_id()
+        self._cancelar_sino()
         self._parar_animacoes_dashboard()
         self.parar_face_id()
 
+    def alternar_tema(self):
+        self.focus_set()
+        alternar_tema()
+        self._reconstruir_ui()
+
+    @staticmethod
+    def _texto_tema():
+        if modo_tema() == "dark":
+            return "☀️  Modo claro"
+        return "🌙  Modo escuro"
+
+    def _reconstruir_ui(self):
+        pagina = self._pagina_atual or "dashboard"
+
+        self._cancelar_atualizacao_dashboard()
+        self._cancelar_relogio_dashboard()
+        self._cancelar_estado_face_id()
+        self._cancelar_arranque_face_id()
+        self._parar_animacoes_dashboard()
+
+        self._pagina_atual = None
+
+        for filho in self.winfo_children():
+            filho.destroy()
+
+        self.configure(fg_color=TEMA["bg"])
+        self._criar_layout()
+        self._configurar_treeview()
+        self._mostrar_pagina(pagina)
+
     def _criar_layout(self):
+        self._botoes_nav = {}
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -577,7 +655,7 @@ class AcademiaApp(ctk.CTk):
                 hover_color=TEMA["sidebar_hover"],
                 command=lambda c=chave: self._mostrar_pagina(c),
             )
-            btn.grid(row=i, column=0, padx=12, pady=4, sticky="ew")
+            btn.grid(row=i, column=0, padx=12, pady=3, sticky="ew")
             self._botoes_nav[chave] = btn
 
         ctk.CTkButton(
@@ -783,6 +861,27 @@ class AcademiaApp(ctk.CTk):
         )
         self._dashboard_clock.pack(side="left", padx=(0, 6))
 
+        btn_secondary(
+            acoes,
+            text="↻",
+            width=34,
+            height=30,
+            font=ctk.CTkFont(size=17),
+            command=self._atualizar_dashboard,
+        ).pack(side="left", padx=(6, 0))
+
+        self.btn_tema = btn_secondary(
+            acoes,
+            text=self._texto_tema(),
+            width=150,
+            height=30,
+            font=ctk.CTkFont(size=12),
+            command=self.alternar_tema,
+        )
+        self.btn_tema.pack(side="left", padx=(6, 0))
+
+        self.sino.botao(acoes, height=30, width=66).pack(side="right", padx=(8, 0))
+
         metrics = ctk.CTkFrame(frame, fg_color="transparent")
         metrics.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         for col in range(4):
@@ -793,7 +892,7 @@ class AcademiaApp(ctk.CTk):
                 ("total_alunos", "👥", "Total de alunos", TEMA["accent"]),
                 ("funcionarios_registados", "👨‍💼", "Funcionários", TEMA["cyan"]),
                 ("receita_total", "💰", "Receita total", TEMA["success"]),
-                ("receita_mes", "📈", "Receita do mês", "#a78bfa"),
+                ("receita_mes", "📈", "Receita do mês", TEMA["violet"]),
                 ("mensalidades_validas", "✓", "Mensalidades pagas", TEMA["success"]),
                 ("mensalidades_atrasadas", "!", "Mensalidades em atraso", TEMA["danger"]),
                 ("presencas_hoje", "📅", "Presenças hoje", TEMA["warning"]),
@@ -891,7 +990,7 @@ class AcademiaApp(ctk.CTk):
         frame.grid_columnconfigure(1, weight=1)
         frame.grid_rowconfigure(1, weight=1)
 
-        header = PageHeader(frame, "Gestão de Alunos", "Registar, editar e consultar alunos")
+        header = PageHeader(frame, "Gestão de Alunos", "Registar, editar e consultar alunos", sino=self.sino)
         header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
 
         btn_primary(header.actions, text="+ Novo Aluno", command=self._novo_aluno).pack(
@@ -1037,7 +1136,7 @@ class AcademiaApp(ctk.CTk):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(1, weight=1)
 
-        header = PageHeader(frame, "Gestão de Funcionários", "Utilizadores e permissões do sistema")
+        header = PageHeader(frame, "Gestão de Funcionários", "Utilizadores e permissões do sistema", sino=self.sino)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         btn_primary(header.actions, text="+ Novo Funcionário", command=self._novo_funcionario).pack(
@@ -1078,9 +1177,9 @@ class AcademiaApp(ctk.CTk):
         }
 
         widths = {
-            "id": 60,
-            "nome": 250,
-            "usuario": 220,
+            "id": 55,
+            "nome": 320,
+            "usuario": 200,
             "tipo": 150,
         }
 
@@ -1279,8 +1378,10 @@ class AcademiaApp(ctk.CTk):
 
         item_para_reselecionar = None
         for indice, aluno in enumerate(alunos_filtrados):
-            valida = pagamentos.mensalidade_valida(aluno["id"])
-            estado = "✓ Válida" if valida else "✗ Expirada"
+            estado_mensalidade, _vencimento = pagamentos.situacao_mensalidade(aluno["id"])
+            estado = "✓ Válida" if estado_mensalidade == "paga" else (
+                "✗ Expirada" if estado_mensalidade == "atrasada" else "— Sem pagamento"
+            )
             iid = f"aluno_{indice}"
             self.tree_alunos.insert(
                 "",
@@ -1373,7 +1474,10 @@ class AcademiaApp(ctk.CTk):
             self._limpar_detalhes_aluno()
             return
 
-        mensalidade = "✓ Válida" if pagamentos.mensalidade_valida(aluno["id"]) else "✗ Expirada"
+        estado_mensalidade, _vencimento = pagamentos.situacao_mensalidade(aluno["id"])
+        mensalidade = "✓ Válida" if estado_mensalidade == "paga" else (
+            "✗ Expirada" if estado_mensalidade == "atrasada" else "— Sem pagamento"
+        )
         detalhes = {
             "nome": aluno.get("nome", "—"),
             "id": str(aluno.get("id", "—")),
@@ -1415,7 +1519,7 @@ class AcademiaApp(ctk.CTk):
         self.aluno_foto_label.configure(image=None, text="Sem foto")
 
     def _novo_aluno(self):
-        def callback(nome, telemovel, documento, plano):
+        def callback(nome, telemovel, documento, plano, nova_foto=False):
             messagebox.showinfo(
                 "Foto do aluno",
                 "Vai abrir-se uma janela da câmara (fora desta aplicação).\n\n"
@@ -1453,8 +1557,27 @@ class AcademiaApp(ctk.CTk):
         if not aluno:
             return
 
-        def callback(nome, telemovel, documento, plano):
-            resultado = gestao_alunos.editar_aluno(id_aluno, nome, telemovel, documento, plano)
+        def callback(nome, telemovel, documento, plano, nova_foto=False):
+            if nova_foto:
+                messagebox.showinfo(
+                    "Foto do aluno",
+                    "Vai abrir-se uma janela da câmara (fora desta aplicação).\n\n"
+                    "• Centre o rosto do aluno na câmara\n"
+                    "• Pressione P para tirar a nova foto\n"
+                    "• Pressione Q para cancelar e manter a foto atual",
+                )
+                self.withdraw()
+            try:
+                resultado = gestao_alunos.editar_aluno(
+                    id_aluno, nome, telemovel, documento, plano, nova_foto=nova_foto
+                )
+            except Exception as erro:
+                if nova_foto:
+                    self.deiconify()
+                messagebox.showerror("Erro", str(erro))
+                return
+            if nova_foto:
+                self.deiconify()
             if resultado is True:
                 messagebox.showinfo("Sucesso", f"Aluno '{nome}' atualizado.")
                 self._atualizar_lista_alunos()
@@ -1482,21 +1605,36 @@ class AcademiaApp(ctk.CTk):
         if not messagebox.askyesno(
             "Confirmar",
             f"Mover '{aluno['nome']}' para o arquivo de exclusão?",
+            parent=self,
         ):
             return
 
-        if gestao_alunos.eliminar_aluno(id_aluno):
-            messagebox.showinfo("Sucesso", "Aluno movido para o arquivo.")
+        try:
+            sucesso = gestao_alunos.eliminar_aluno(id_aluno)
+        except Exception as erro:
+            messagebox.showerror(
+                "Erro",
+                f"Não foi possível eliminar o aluno.\n\n{erro}",
+                parent=self,
+            )
+            return
+
+        if sucesso:
+            messagebox.showinfo("Sucesso", "Aluno movido para o arquivo.", parent=self)
             self._atualizar_lista_alunos()
         else:
-            messagebox.showerror("Erro", "Não foi possível eliminar o aluno.")
+            messagebox.showerror(
+                "Erro",
+                "Não foi possível eliminar o aluno.",
+                parent=self,
+            )
 
     def _criar_excluidos(self):
         frame = PageFrame(self.content)
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(1, weight=1)
 
-        header = PageHeader(frame, "Arquivo de Exclusão", "Alunos removidos — restauração disponível")
+        header = PageHeader(frame, "Arquivo de Exclusão", "Alunos removidos — restauração disponível", sino=self.sino)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         btn_primary(header.actions, text="Restaurar", command=self._restaurar_aluno).pack(
@@ -1613,9 +1751,16 @@ class AcademiaApp(ctk.CTk):
         frame = PageFrame(self.content)
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(2, weight=1)
+        self._pag_alunos = []
 
-        header = PageHeader(frame, "Pagamentos", "Registar mensalidades e consultar histórico")
+        header = PageHeader(frame, "Pagamentos", "Registar mensalidades e consultar histórico", sino=self.sino)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+
+        btn_primary(
+            header.actions,
+            text="📄 Gerar Relatório PDF",
+            command=self._abrir_relatorio,
+        ).pack(side="left", padx=4)
 
         if self.admin:
             btn_danger(
@@ -1628,23 +1773,34 @@ class AcademiaApp(ctk.CTk):
         form.grid(row=1, column=0, sticky="ew", pady=(0, 6))
         form.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(form, text="Aluno", text_color=TEMA["muted"]).grid(
-            row=0, column=0, padx=16, pady=14, sticky="e"
+        ctk.CTkLabel(
+            form,
+            text="🔍",
+            font=ctk.CTkFont(size=14),
+            text_color=TEMA["muted"],
+        ).grid(row=0, column=0, padx=(16, 6), pady=(14, 8), sticky="e")
+        self.pag_aluno_pesquisa = styled_entry(
+            form,
+            placeholder_text="Pesquisar aluno pelo nome...",
+        )
+        self.pag_aluno_pesquisa.grid(row=0, column=1, padx=(0, 10), pady=(14, 8), sticky="ew")
+        self.pag_aluno_pesquisa.bind(
+            "<KeyRelease>", lambda _e: self._atualizar_opcoes_aluno()
         )
         self.pag_aluno_var = ctk.StringVar()
         self.pag_aluno_menu = styled_option(
-            form, variable=self.pag_aluno_var, values=["—"], width=280
+            form, variable=self.pag_aluno_var, values=["—"], width=250
         )
-        self.pag_aluno_menu.grid(row=0, column=1, padx=10, pady=14, sticky="w")
+        self.pag_aluno_menu.grid(row=0, column=2, padx=(0, 16), pady=(14, 8), sticky="e")
 
         ctk.CTkLabel(form, text="Valor (€)", text_color=TEMA["muted"]).grid(
-            row=0, column=2, padx=10, pady=14, sticky="e"
+            row=1, column=0, padx=16, pady=(8, 14), sticky="e"
         )
-        self.pag_valor_entry = styled_entry(form, width=120, placeholder_text="0.00")
-        self.pag_valor_entry.grid(row=0, column=3, padx=10, pady=14, sticky="w")
+        self.pag_valor_entry = styled_entry(form, width=140, placeholder_text="0.00")
+        self.pag_valor_entry.grid(row=1, column=1, padx=(0, 10), pady=(8, 14), sticky="w")
 
         btn_primary(form, text="Registar Pagamento", command=self._registar_pagamento).grid(
-            row=0, column=4, padx=16, pady=14
+            row=1, column=2, padx=(0, 16), pady=(8, 14), sticky="e"
         )
 
         table_frame = TablePanel(frame)
@@ -1665,7 +1821,7 @@ class AcademiaApp(ctk.CTk):
         )
         self.pag_pesquisa.grid(row=0, column=1, sticky="ew")
         self.pag_pesquisa.bind(
-            "<KeyRelease>", lambda _e: self._atualizar_pagamentos()
+            "<KeyRelease>", lambda _e: self._preencher_tabela_pagamentos()
         )
 
         cols = ("aluno", "plano", "valor", "data_pagamento", "data_vencimento", "estado")
@@ -1692,33 +1848,60 @@ class AcademiaApp(ctk.CTk):
 
         return frame
 
-    def _atualizar_pagamentos(self):
-        nomes = []
-        self._pag_map = {}
+    def _atualizar_lista_alunos_pagamento(self):
+        self._pag_alunos = []
         for aluno in gestao_alunos.listar_alunos():
-            texto = f"{aluno['id']} — {aluno['nome']}"
-            nomes.append(texto)
-            self._pag_map[texto] = aluno["id"]
+            self._pag_alunos.append({
+                "id": aluno["id"],
+                "nome": aluno["nome"],
+                "texto": f"{aluno['id']} — {aluno['nome']}",
+            })
+        self._atualizar_opcoes_aluno()
 
-        if nomes:
-            self.pag_aluno_menu.configure(values=nomes)
-            self.pag_aluno_var.set(nomes[0])
-        else:
+    def _atualizar_opcoes_aluno(self):
+        if not hasattr(self, "pag_aluno_menu"):
+            return
+
+        termo = sem_acentos(self.pag_aluno_pesquisa.get().strip())
+        self._pag_map = {}
+        opcoes = []
+
+        for aluno in self._pag_alunos:
+            if termo and termo not in sem_acentos(aluno["nome"]):
+                continue
+            self._pag_map[aluno["texto"]] = aluno["id"]
+            opcoes.append(aluno["texto"])
+
+        if not opcoes:
             self.pag_aluno_menu.configure(values=["—"])
             self.pag_aluno_var.set("—")
+            return
 
+        if len(opcoes) == 1:
+            self.pag_aluno_var.set(opcoes[0])
+        elif self.pag_aluno_var.get() in opcoes:
+            pass
+        else:
+            self.pag_aluno_var.set(opcoes[0])
+        self.pag_aluno_menu.configure(values=opcoes)
+
+    def _atualizar_pagamentos(self):
+        self._atualizar_lista_alunos_pagamento()
+        self._preencher_tabela_pagamentos()
+
+    def _preencher_tabela_pagamentos(self):
         for item in self.tree_pagamentos.get_children():
             self.tree_pagamentos.delete(item)
 
         termo = ""
         if hasattr(self, "pag_pesquisa"):
-            termo = self.pag_pesquisa.get().strip().lower()
+            termo = sem_acentos(self.pag_pesquisa.get().strip())
 
         self._pag_tree_map = {}
         indice = 0
         for pag in reversed(pagamentos.pagamentos):
             nome = nome_aluno(pag["id_aluno"])
-            if termo and termo not in nome.lower():
+            if termo and termo not in sem_acentos(nome):
                 continue
             iid = f"pag_{indice}"
             id_pagamento = pag.get("id")
@@ -1788,8 +1971,16 @@ class AcademiaApp(ctk.CTk):
 
     def _registar_pagamento(self):
         selecionado = self.pag_aluno_var.get()
+
         if selecionado == "—" or selecionado not in self._pag_map:
-            messagebox.showwarning("Aviso", "Não existem alunos registados.")
+            if not self._pag_alunos:
+                messagebox.showwarning("Aviso", "Não existem alunos registados.")
+            else:
+                messagebox.showwarning(
+                    "Aviso",
+                    "Nenhum aluno encontrado. Escolha um aluno na lista ou "
+                    "altere a pesquisa.",
+                )
             return
 
         valor_texto = self.pag_valor_entry.get().strip().replace(",", ".")
@@ -1816,7 +2007,7 @@ class AcademiaApp(ctk.CTk):
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(3, weight=1)
 
-        header = PageHeader(frame, "Presenças", "Registar entradas e consultar o histórico diário")
+        header = PageHeader(frame, "Presenças", "Registar entradas e consultar o histórico diário", sino=self.sino)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         btn_primary(
@@ -1957,6 +2148,7 @@ class AcademiaApp(ctk.CTk):
             frame,
             "Arquivo de Presenças",
             "Histórico permanente de presenças (guardado nos Logs do sistema)",
+            sino=self.sino,
         )
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
@@ -2048,7 +2240,7 @@ class AcademiaApp(ctk.CTk):
         frame = PageFrame(self.content)
         frame.grid_columnconfigure(0, weight=1)
 
-        header = PageHeader(frame, "Câmara", "Configure a câmara usada no Face ID e no registo de alunos")
+        header = PageHeader(frame, "Câmara", "Configure a câmara usada no Face ID e no registo de alunos", sino=self.sino)
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
         # --- Configuração da câmara ---
@@ -2075,6 +2267,10 @@ class AcademiaApp(ctk.CTk):
             config_card,
             values=[f"Câmara {i}" for i in self._cameras_disponiveis],
             command=lambda v: self._camera_var.set(v.replace("Câmara ", "")),
+            fg_color=(TEMA["input_bg"], "#1F6AA5"),
+            button_color=(TEMA["border"], "#144870"),
+            button_hover_color=(TEMA["accent"], "#203A4F"),
+            text_color=(TEMA["on_surface"], "#DCE4EE"),
         )
         self._camera_menu.set(f"Câmara {indice_atual}")
         self._camera_menu.grid(row=1, column=1, padx=(5, 10), pady=(0, 18), sticky="w")
@@ -2184,6 +2380,7 @@ class AcademiaApp(ctk.CTk):
             frame,
             "Administração",
             "Consultar os Logs de administração e acesso do sistema",
+            sino=self.sino,
         )
         header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
 
@@ -2245,6 +2442,10 @@ class AcademiaApp(ctk.CTk):
             variable=self.log_filtro_var,
             command=lambda _v: self._atualizar_logs_administracao(),
             width=200,
+            fg_color=(TEMA["input_bg"], "#1F6AA5"),
+            button_color=(TEMA["border"], "#144870"),
+            button_hover_color=(TEMA["accent"], "#203A4F"),
+            text_color=(TEMA["on_surface"], "#DCE4EE"),
         )
         self.log_filtro_menu.pack(anchor="w", pady=(6, 0))
 

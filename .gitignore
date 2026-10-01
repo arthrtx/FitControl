@@ -1,6 +1,7 @@
 # Ambientes e interpretadores
 .venv/
 venv/
+.python/
 
 # Ficheiros compilados / cache
 __pycache__/

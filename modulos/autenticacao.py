@@ -48,9 +48,15 @@ def escrever_log(evento):
 # AUXILIARES
 # =====================================================
 def procurar_utilizador(usuario):
+    alvo = usuario.strip().lower()
+
+    if alvo == "":
+        return None
+
     for utilizador in funcionarios:
-        if utilizador["usuario"].lower() == usuario.lower():
+        if utilizador["usuario"].lower() == alvo:
             return utilizador
+
     return None
 
 
@@ -67,6 +73,16 @@ def e_admin_temporario(utilizador):
         and utilizador.get("senha") == "adm"
         and utilizador.get("nome") == "Administrador Temporário"
     )
+
+
+def admin_temporario_ativo():
+    try:
+        for utilizador in get_funcionarios():
+            if e_admin_temporario(utilizador):
+                return True
+    except Exception:
+        return False
+    return False
 
 # BLOQUEIO DE LOGIN
 # =====================================================
@@ -119,6 +135,8 @@ def limpar_tentativas(usuario):
 # =====================================================
 def autenticar(usuario, senha):
     global sessao
+
+    usuario = usuario.strip()
 
     carregar_funcionarios()
 

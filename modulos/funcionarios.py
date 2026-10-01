@@ -98,7 +98,7 @@ def criar_funcionario(nome, usuario, senha, tipo):
 
     if senha == "":
         return False
-    
+
     tipos_validos = [
             "Funcionario",
             "Administrador"
@@ -180,9 +180,6 @@ def editar_funcionario(id_funcionario, nome, usuario, senha, tipo):
     for funcionario in funcionarios:
 
         if funcionario["id"] == id_funcionario:
-            print("ID recebido:", id_funcionario, type(id_funcionario))
-            print("ID guardado :", funcionario["id"], type(funcionario["id"]))
-            
 
             funcionario["nome"] = nome
             funcionario["usuario"] = usuario
@@ -214,6 +211,31 @@ def eliminar_funcionario(id_funcionario):
 
             escrever_log(
                 f"Funcionário '{funcionario['nome']}' eliminado."
+            )
+
+            return True
+
+    return False
+# ======================================================
+# alterar palavra-passe
+# ======================================================
+def alterar_senha(id_funcionario, senha):
+
+    senha = senha.strip()
+
+    if senha == "":
+        return False
+
+    for funcionario in funcionarios:
+
+        if funcionario["id"] == id_funcionario:
+
+            funcionario["senha"] = senha
+
+            update_funcionario(funcionario)
+
+            escrever_log(
+                f"Palavra-passe do funcionário '{funcionario['nome']}' alterada."
             )
 
             return True

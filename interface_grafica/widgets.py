@@ -9,6 +9,7 @@ def btn_primary(master, **kwargs):
     opts = {
         "fg_color": TEMA["accent"],
         "hover_color": TEMA["accent_hover"],
+        "text_color": TEMA["on_accent"],
         "corner_radius": TEMA["radius_sm"],
         "height": 34,
     }
@@ -20,6 +21,7 @@ def btn_secondary(master, **kwargs):
     opts = {
         "fg_color": TEMA["surface_alt"],
         "hover_color": TEMA["border"],
+        "text_color": TEMA["on_surface"],
         "corner_radius": TEMA["radius_sm"],
         "height": 34,
     }
@@ -31,6 +33,7 @@ def btn_danger(master, **kwargs):
     opts = {
         "fg_color": TEMA["danger"],
         "hover_color": TEMA["danger_hover"],
+        "text_color": TEMA["on_accent"],
         "corner_radius": TEMA["radius_sm"],
         "height": 34,
     }
@@ -57,6 +60,7 @@ def styled_option(master, **kwargs):
         "fg_color": TEMA["input_bg"],
         "button_color": TEMA["border"],
         "button_hover_color": TEMA["accent"],
+        "text_color": TEMA["on_surface"],
     }
     opts.update(kwargs)
     return ctk.CTkOptionMenu(master, **opts)
@@ -64,9 +68,39 @@ def styled_option(master, **kwargs):
 
 def centre_toplevel(janela, master):
     janela.update_idletasks()
-    x = master.winfo_x() + (master.winfo_width() - janela.winfo_width()) // 2
-    y = master.winfo_y() + (master.winfo_height() - janela.winfo_height()) // 2
+    x = master.winfo_x() + master.winfo_width() // 2 - janela.winfo_width() // 2
+    y = master.winfo_y() + master.winfo_height() // 2 - janela.winfo_height() // 2
     janela.geometry(f"+{x}+{y}")
+
+
+class Sino:
+    def __init__(self, command):
+        self.command = command
+        self.var = ctk.StringVar(value="🔔")
+
+    def definir(self, total):
+        if total:
+            self.var.set(f"🔔  {total}")
+        else:
+            self.var.set("🔔")
+
+    def botao(self, master, **kwargs):
+        opts = {
+            "text": "🔔",
+            "textvariable": self.var,
+            "command": self.command,
+            "width": 66,
+            "height": 34,
+            "corner_radius": TEMA["radius_sm"],
+            "fg_color": TEMA["surface"],
+            "hover_color": TEMA["surface_alt"],
+            "border_width": 1,
+            "border_color": TEMA["border"],
+            "text_color": TEMA["danger"],
+            "font": ctk.CTkFont(size=14, weight="bold"),
+        }
+        opts.update(kwargs)
+        return ctk.CTkButton(master, **opts)
 
 
 class PageFrame(ctk.CTkFrame):
@@ -85,7 +119,7 @@ class SurfaceCard(ctk.CTkFrame):
 
 
 class PageHeader(ctk.CTkFrame):
-    def __init__(self, master, title, subtitle=None):
+    def __init__(self, master, title, subtitle=None, sino=None):
         super().__init__(master, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
 
@@ -110,6 +144,8 @@ class PageHeader(ctk.CTkFrame):
 
         self.actions = ctk.CTkFrame(self, fg_color="transparent")
         self.actions.grid(row=0, column=1, sticky="e")
+        if sino:
+            sino.botao(self.actions).pack(side="right", padx=(8, 0))
         self.bind("<Configure>", self._relayout)
 
     def _relayout(self, _event=None):

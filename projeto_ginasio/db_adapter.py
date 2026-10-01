@@ -166,31 +166,41 @@ def save_alunos_excluidos(alunos_list):
 
 def add_aluno_excluido(aluno):
     conn = _get_connection()
-    cursor = conn.cursor()
-    embedding = aluno.get('embedding')
-    if embedding:
-        if hasattr(embedding, 'tolist'):
-            embedding = embedding.tolist()
-        embedding_json = json.dumps(embedding, separators=(',', ':'))
-    else:
-        embedding_json = None
-    cursor.execute('''
-        INSERT INTO alunos_excluidos (id, nome, telemovel, documento, plano, foto, embedding, data_exclusao)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        aluno['id'], aluno['nome'], aluno['telemovel'],
-        aluno['documento'], aluno['plano'], aluno.get('foto'),
-        embedding_json, aluno.get('data_exclusao', '')
-    ))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        embedding = aluno.get('embedding')
+        if embedding:
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
+            embedding_json = json.dumps(embedding, separators=(',', ':'))
+        else:
+            embedding_json = None
+        cursor.execute('''
+            INSERT OR REPLACE INTO alunos_excluidos (id, nome, telemovel, documento, plano, foto, embedding, data_exclusao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            aluno['id'], aluno['nome'], aluno['telemovel'],
+            aluno['documento'], aluno['plano'], aluno.get('foto'),
+            embedding_json, aluno.get('data_exclusao', '')
+        ))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def remove_aluno_excluido(id_aluno):
     conn = _get_connection()
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM alunos_excluidos WHERE id=?', (id_aluno,))
-    conn.commit()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM alunos_excluidos WHERE id=?', (id_aluno,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 # Funções para funcionários
 def get_funcionarios():
@@ -221,10 +231,10 @@ def add_funcionario(funcionario):
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO funcionarios (nome, usuario, senha, tipo)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO funcionarios (id, nome, usuario, senha, tipo)
+        VALUES (?, ?, ?, ?, ?)
     ''', (
-        funcionario['nome'], funcionario['usuario'],
+        funcionario.get('id'), funcionario['nome'], funcionario['usuario'],
         funcionario['senha'], funcionario['tipo']
     ))
     conn.commit()
@@ -239,7 +249,8 @@ def update_funcionario(funcionario):
         WHERE id=?
     ''', (
         funcionario['nome'], funcionario['usuario'],
-        funcionario['senha'], funcionario['tipo'], funcionario['id']
+        funcionario['senha'], funcionario['tipo'],
+        funcionario['id']
     ))
     conn.commit()
     conn.close()
@@ -424,5 +435,70 @@ def limpar_todos_logs():
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute('DELETE FROM logs')
+    conn.commit()
+    conn.close()
+
+def guardar_notificacao(notificacao):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    cursor.execute('''
+        INSERT INTO notificacoes (chave, tipo, titulo, mensagem, ref_id, data, lida)
+        VALUES (?, ?, ?, ?, ?, ?, 0)
+        ON CONFLICT(chave) DO UPDATE SET
+            tipo=excluded.tipo,
+            titulo=excluded.titulo,
+            mensagem=excluded.mensagem,
+            ref_id=excluded.ref_id
+    ''', (
+        notificacao['chave'], notificacao['tipo'],
+        notificacao['titulo'], notificacao['mensagem'],
+        notificacao.get('ref_id'), data
+    ))
+    conn.commit()
+    conn.close()
+
+def get_notificacoes():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM notificacoes ORDER BY lida, id DESC')
+    rows = cursor.fetchall()
+    notificacoes = [dict(row) for row in rows]
+    conn.close()
+    return notificacoes
+
+def contar_notificacoes_pendentes():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM notificacoes WHERE lida=0')
+    total = cursor.fetchone()[0]
+    conn.close()
+    return total
+
+def marcar_notificacao_lida(id_notificacao):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE notificacoes SET lida=1 WHERE id=?', (id_notificacao,))
+    conn.commit()
+    conn.close()
+
+def marcar_notificacoes_lidas():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE notificacoes SET lida=1')
+    conn.commit()
+    conn.close()
+
+def apagar_notificacao(chave):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM notificacoes WHERE chave=?', (chave,))
+    conn.commit()
+    conn.close()
+
+def apagar_notificacoes_lidas():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM notificacoes WHERE lida=1')
     conn.commit()
     conn.close()

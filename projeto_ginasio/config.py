@@ -17,8 +17,9 @@ PASTA_ARQUIVOS = os.path.join(DADOS, "arquivos")
 PASTA_FACES = os.path.join(DADOS, "faces")
 PASTA_CAPTURAS = os.path.join(DADOS, "capturas")
 PASTA_VIDEOS = os.path.join(DADOS, "videos")
+PASTA_RELATORIOS = os.path.join(DADOS, "relatorios")
 
-for pasta in (DADOS, PASTA_ARQUIVOS, PASTA_FACES, PASTA_CAPTURAS, PASTA_VIDEOS):
+for pasta in (DADOS, PASTA_ARQUIVOS, PASTA_FACES, PASTA_CAPTURAS, PASTA_VIDEOS, PASTA_RELATORIOS):
     os.makedirs(pasta, exist_ok=True)
 
 # Caminhos de arquivos JSON (mantidos para compatibilidade durante migração)

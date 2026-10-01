@@ -93,13 +93,15 @@ def carregar_alunos():
 # ======================================================
 def gerar_id():
 
-    if not alunos:
+    ids_usados = [aluno["id"] for aluno in alunos]
+
+    ids_usados.extend(aluno["id"] for aluno in alunos_excluidos)
+
+    if not ids_usados:
+
         return 1
 
-    maior = max(aluno["id"] for aluno in alunos)
-
-    return maior + 1
-
+    return max(ids_usados) + 1
 
 # verificar documento
 # ======================================================
@@ -206,7 +208,7 @@ def listar_alunos():
 
 # editar alunos
 # ======================================================
-def editar_aluno(id_aluno, nome, telemovel, documento, plano):
+def editar_aluno(id_aluno, nome, telemovel, documento, plano, nova_foto=False):
 #regras============================
     nome = nome.strip()
     telemovel = telemovel.strip()
@@ -249,6 +251,26 @@ def editar_aluno(id_aluno, nome, telemovel, documento, plano):
 
         if aluno["id"] == id_aluno:
 
+            if nova_foto:
+
+                try:
+
+                    caminho_foto = tirarFoto(str(id_aluno))
+
+                except Exception:
+
+                    caminho_foto = None
+
+                if caminho_foto:
+
+                    embedding = gerar_embedding(
+                        caminho_foto
+                    )
+
+                    aluno["foto"] = caminho_foto
+                    aluno["embedding"] = embedding
+
+
             aluno["nome"] = nome
             aluno["telemovel"] = telemovel
             aluno["documento"] = documento
@@ -275,10 +297,26 @@ def eliminar_aluno(id_aluno):
 
             aluno_excluido["data_exclusao"] = datetime.now().strftime("%d/%m/%Y")
 
-            add_aluno_excluido(aluno_excluido)
-            alunos_excluidos.append(aluno_excluido)
+            for arquivado in alunos_excluidos:
 
-            delete_aluno(id_aluno)
+                if arquivado["id"] == id_aluno:
+
+                    alunos_excluidos.remove(arquivado)
+
+                    break
+
+            try:
+
+                add_aluno_excluido(aluno_excluido)
+                delete_aluno(id_aluno)
+
+            except Exception as erro:
+
+                raise Exception(
+                    f"Não foi possível mover o aluno para o arquivo: {erro}"
+                )
+
+            alunos_excluidos.append(aluno_excluido)
             alunos.remove(aluno)
 
 
@@ -306,10 +344,18 @@ def restaurar_aluno(id_aluno):
 
             aluno.pop("data_exclusao", None)
 
-            add_aluno(aluno)
-            alunos.append(aluno)
+            try:
 
-            remove_aluno_excluido(id_aluno)
+                add_aluno(aluno)
+                remove_aluno_excluido(id_aluno)
+
+            except Exception as erro:
+
+                raise Exception(
+                    f"Não foi possível restaurar o aluno: {erro}"
+                )
+
+            alunos.append(aluno)
             alunos_excluidos.remove(aluno)
 
 

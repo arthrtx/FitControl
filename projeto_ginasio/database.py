@@ -8,6 +8,20 @@ from projeto_ginasio.config import DADOS
 DB_PATH = os.path.join(DADOS, "fitcontrol.db")
 BACKUP_DIR = os.path.join(DADOS, "backups")
 
+TABELA_NOTIFICACOES = '''
+    CREATE TABLE IF NOT EXISTS notificacoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chave TEXT NOT NULL UNIQUE,
+        tipo TEXT NOT NULL,
+        titulo TEXT NOT NULL,
+        mensagem TEXT NOT NULL,
+        ref_id INTEGER,
+        data TEXT NOT NULL,
+        lida INTEGER NOT NULL DEFAULT 0
+    )
+'''
+
+
 def _get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -91,7 +105,9 @@ def _init_database():
             evento TEXT NOT NULL
         )
     ''')
-    
+
+    cursor.execute(TABELA_NOTIFICACOES)
+
     conn.commit()
     conn.close()
 
@@ -111,6 +127,19 @@ def _migrar_esquema():
         except Exception as e:
             print(f"Não foi possível adicionar a coluna 'tipo': {e}")
 
+    colunas = [row[1] for row in cursor.execute('PRAGMA table_info(funcionarios)')]
+    if 'email' in colunas:
+        try:
+            cursor.execute("ALTER TABLE funcionarios DROP COLUMN email")
+            print("Coluna 'email' removida da tabela funcionarios.")
+        except Exception as e:
+            print(f"Não foi possível remover a coluna 'email': {e}")
+
+    try:
+        cursor.execute(TABELA_NOTIFICACOES)
+    except Exception as e:
+        print(f"Não foi possível criar as tabelas novas: {e}")
+
     # Remover a tabela 'historico_acessos' (Histórico de Acessos foi abolido;
     # todos os registos passam a viver na tabela 'logs' com a coluna 'tipo')
     tabelas = [row[0] for row in cursor.execute(
@@ -122,6 +151,11 @@ def _migrar_esquema():
             print("Tabela 'historico_acessos' removida (abolido o Histórico de Acessos).")
         except Exception as e:
             print(f"Não foi possível remover a tabela 'historico_acessos': {e}")
+
+    try:
+        cursor.execute("DROP TABLE IF EXISTS recuperacoes")
+    except Exception as e:
+        print(f"Não foi possível remover a tabela 'recuperacoes': {e}")
 
     conn.commit()
     conn.close()
@@ -274,6 +308,7 @@ if not os.path.exists(DB_PATH):
     print("Banco de dados SQLite criado com sucesso.")
 else:
     print("Banco de dados SQLite já existe.")
+    _init_database()
     _migrar_esquema()
 
 # Criar diretório de backups

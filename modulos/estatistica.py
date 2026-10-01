@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from projeto_ginasio.dados import alunos, pagamentos, presencas
-from modulos.pagamentos import mensalidade_valida
+from modulos.pagamentos import situacao_mensalidade
 from modulos.funcionarios import funcionarios
 
 
@@ -48,9 +48,11 @@ def estatisticas():
         elif aluno["plano"] == "Anual":
             anual += 1
 
-        if mensalidade_valida(aluno["id"]):
+        estado_mensalidade, _vencimento = situacao_mensalidade(aluno["id"])
+
+        if estado_mensalidade == "paga":
             mensalidades_validas += 1
-        else:
+        elif estado_mensalidade == "atrasada":
             mensalidades_atrasadas += 1
 
 
