@@ -16,28 +16,30 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 
 ## Novidades
 
-### Atualização de etiquetas e PDF
+### Relatório PDF (novo)
 
-- **Relatório PDF redesenhado**: cabeçalho, cartões de resumo, tabelas, paginação e rodapé reorganizados para leitura mais clara. O botão **Gerar Relatório PDF** passou a usar o estilo primário da aplicação.
-- **Relatórios agrupados por plano**: para além do total de alunos, o PDF apresenta agora o valor médio pago por plano.
-- **Pesquisa de pagamentos apenas por nome**: o campo **Pesquisar aluno pelo nome...** filtra somente pelo nome do aluno. O documento, telemóvel e ID deixaram de ser usados na pesquisa.
+- **Relatório PDF**: a aplicação passa a gerar um relatório em PDF do mês selecionado, com escolha do período, cabeçalho, cartões de resumo, tabelas, paginação e rodapé.
+- **Resumo por plano**: para além do total e do valor médio pago, o relatório apresenta a quantidade e o total pago agrupados por plano.
+- Novo módulo `modulos/relatorios.py` e dependência `reportlab`.
 
-### Melhorias de interface
+### Termos de Utilização e Notificações (novo)
 
-- **Atualização manual do dashboard**: o botão `↻` entre o relógio e o botão de tema permite recarregar cartões e gráficos sem recarregar a aplicação.
-- **Dashboard mais completo**: 7 cartões de indicadores e 4 gráficos.
+- **Aceitação dos Termos de Utilização no login**: no primeiro acesso do administrador temporário, os termos têm de ser aceites antes de entrar.
+- **Aviso de notificações** para o aluno, com módulo próprio `modulos/notificacoes.py`.
 
-### Alunos e fotografia
+### Fotografia
 
-- **Atualização de foto na edição**: ao editar um aluno é possível marcar a caixa **📷 Tirar nova foto ao guardar** para capturar uma nova fotografia pela câmera. A referência facial é recalculada e guardada automaticamente.
-- **Cancelamento sem perda**: se cancelar a captura da câmera, a foto existente é mantida e a edição continua normalmente.
-- **Foto apenas na edição**: criar um mantém o comportamento atual (tirar foto ao criar); a opção de troca de foto existe apenas no formulário de edição.
+- **Tirar nova foto ao editar um aluno**: no formulário de edição existe a opção **📷 Tirar nova foto ao guardar**. A referência facial é recalculada e guardada automaticamente.
+- Se a captura for cancelada, a foto existente é mantida e a edição continua.
 
 ### Correções de estabilidade
 
-- **Eliminação de alunos corrigida**: eliminar um aluno e movê-lo para o arquivo de exclusão já não bloqueia a aplicação. A causa era a reutilização de identificadores entre alunos ativos e arquivados, que gerava um conflito na base de dados e deixava a base bloqueada em todas as escritas seguintes.
-- **Identificadores únicos garantidos**: os novos alunos já não reaproveitam o número de um aluno que está no arquivo de exclusão.
-- **Erros visíveis**: se a eliminação falhar, é apresentada uma mensagem de erro em vez de a aplicação ficar aparentemente congelada.
+- **Eliminação de alunos**: eliminar um aluno deixava a aplicação bloqueada. A causa era `gerar_id()` reutilizar o identificador de um aluno que já estava no arquivo de exclusão, o que gerava um conflito na tabela `alunos_excluidos` e deixava a base de dados bloqueada em todas as escritas seguintes.
+- **Identificadores únicos**: os novos alunos já não reaproveitam o número de um aluno arquivado.
+- **Fecho das ligações SQLite**: as ligações da base de dados passaram a ser fechadas mesmo quando ocorre um erro, libertando o bloqueio.
+- **Erros visíveis**: se uma eliminação falhar, é apresentada uma mensagem de erro em vez de a aplicação ficar aparentemente congelada.
+- **Pesquisa sem acentos**: na área de pagamentos, a pesquisa por nome e o seletor de aluno passaram a ignorar acentos, para que por exemplo `sao` encontre `São`.
+- **Instalação automática**: o `run.bat` passa a detetar o Python, criar o ambiente virtual e instalar as dependências automaticamente.
 
 ## Novidades desta versão (Edição Portátil)
 
