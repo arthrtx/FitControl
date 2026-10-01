@@ -60,7 +60,7 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 
 ### Opção 1 — Versão portátil (recomendada)
 
-1. Vá à secção **Releases** deste repositório e descarregue `FitControl-Portable-V4.zip`.
+1. Vá à secção **Releases** deste repositório e descarregue `FitControl-Portable-V4.2.zip`.
 2. Extraia para qualquer pasta (ex.: Área de Trabalho ou Documentos).
 3. Abra a pasta e faça duplo clique em **FitControl.exe**.
 

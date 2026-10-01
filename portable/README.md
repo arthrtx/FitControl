@@ -15,7 +15,7 @@ isso a versão portátil é publicada como **Release** (download até 2 GB).
 
 1. Abra a secção **Releases** deste repositório (ou utilize o link na página
    principal do projeto).
-2. Descarregue o ficheiro **`FitControl-Portable-V4.zip`**.
+2. Descarregue o ficheiro **`FitControl-Portable-V4.2.zip`**.
 3. Extraia para qualquer pasta (ex.: Área de Trabalho ou Documentos).
 4. Faça duplo clique em **`FitControl.exe`**.
 
