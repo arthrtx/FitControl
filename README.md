@@ -50,19 +50,19 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 
 ## Novidades desta versão (Edição Portátil)
 
-- **Versão portátil pronta a usar**: o executável e todas as dependências (Python, OpenCV, modelo facial e bibliotecas) vêm já empacotados na pasta `_internal`. Basta extrair e executar `FitControl.exe` — **não requer instalação nem internet**.
+- **Versão portátil pronta a usar**: um único ficheiro `FitControl.exe` com todas as dependências (Python, OpenCV, modelo facial e bibliotecas) embutidas. Basta descarregar e executar — **não requer instalação nem internet**.
 - **Face ID corrigido e validado de ponta a ponta**: o modelo de reconhecimento (insightface `buffalo_l`) e os dados auxiliares do insightface ficam embutidos no executável, eliminando os erros que impediam o Face ID de funcionar fora do ambiente de desenvolvimento.
 - **Base de Dados começa vazia**: a primeira execução cria automaticamente uma base de dados limpa (estado de fábrica), pronta para registar a sua academia.
 - **Aviso do administrador temporário**: no primeiro login é alertado para alterar os dados da conta temporária ou criar outra conta de administrador; o aviso desaparece assim que o fizer.
-- Executável gerado com o **PyInstaller (onedir)** e testado: login, painel principal e reconhecimento facial validados no executável final.
+- Executável gerado com o **PyInstaller (onefile)** e testado: login, painel principal e reconhecimento facial validados no executável final.
 
 ## Como executar
 
-### Opção 1 — Versão portátil (recomendada)
+### Opção 1 — Executável (recomendada)
 
-1. Vá à secção **Releases** deste repositório e descarregue `FitControl-Portable-V4.2.zip`.
-2. Extraia para qualquer pasta (ex.: Área de Trabalho ou Documentos).
-3. Abra a pasta e faça duplo clique em **FitControl.exe**.
+1. Vá à secção **Releases** deste repositório e descarregue **`FitControl.exe`**.
+2. Guarde-o em qualquer pasta (ex.: Área de Trabalho ou Documentos).
+3. Faça duplo clique em **FitControl.exe**.
 
 > Requisitos: Windows 10 ou Windows 11 (64 bits). Câmera (apenas para o Face ID).
 > Não precisa de instalar Python nem qualquer biblioteca.
@@ -118,7 +118,6 @@ FitControl/
 ├── interface_grafica/          # Interface (login, app, dialogs, widgets)
 ├── modulos/                    # Lógica de negócio (alunos, pagamentos, presenças...)
 ├── projeto_ginasio/            # Configuração, Base de Dados, câmera e Face ID
-├── portable/                   # Instruções da edição portátil
 ├── run_gui.py                  # Ponto de entrada
 ├── run.bat                     # Inicialização rápida no Windows
 ├── requirements.txt            # Dependências Python
