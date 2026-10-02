@@ -19,7 +19,7 @@ FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python 
 
 ### Modo claro (novo)
 
-- **Tema claro**: a aplicação passa a ter dois temas, claro e escuro. O botão **☀️ Modo claro** / **🌙 Modo escuro** no canto superior direito alterna entre os dois a qualquer momento.
+- **Tema claro**: a aplicação passa a ter dois temas, claro e escuro. O botão ** Modo claro** / ** Modo escuro** no canto superior direito alterna entre os dois a qualquer momento.
 - Cartões, gráficos, tabelas e botões acompanham o tema escolhido.
 - Antes, a interface tinha apenas o tema escuro fixo.
 
