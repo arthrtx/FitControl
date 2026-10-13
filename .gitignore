@@ -21,10 +21,10 @@ camera_config.json
 .idea/
 
 # Empacotamento (PyInstaller)
+empacotar/
 build/
 dist/
 *.spec
-!empacotar/FitControl.spec
 
 # Scripts de desenvolvimento
 check_db.py

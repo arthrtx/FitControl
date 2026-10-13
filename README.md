@@ -53,7 +53,6 @@ FitControl é uma aplicação de gestão de academias desenvolvida em Python com
 ### Executável e run.bat
 - Executável novo em pasta (arranca muito mais rápido do que o ficheiro único da V4.2), com o modelo do Face ID e o runtime do Visual C++ incluídos.
 - Os dados ficam na pasta `dados`, ao lado do executável.
-- `empacotar\construir.bat` gera o executável a partir do código.
 - `run.bat` corrigido: fins de linha do Windows, deteção do Python 3.12+ de 64 bits, reinstalação das dependências quando o `requirements.txt` muda.
 
 ## Como executar
@@ -81,11 +80,6 @@ python run_gui.py
 ```
 
 Também pode simplesmente executar o **`run.bat`** (instala o Python se for preciso, cria o ambiente virtual e inicia a aplicação).
-
-### Criar o executável
-
-Com o `run.bat` já usado pelo menos uma vez (e o Face ID aberto uma vez, para o modelo estar descarregado), execute **`empacotar\construir.bat`**.
-O executável é criado na pasta `FitControl`, ao lado da pasta do projeto, sem apagar a pasta `dados` de uma versão anterior.
 
 ### Primeiro acesso
 
@@ -141,7 +135,6 @@ FitControl/
 │   └── paginas/                # Dashboard, Alunos, Pagamentos, Presenças, Arquivos, Sistema, Câmara
 ├── modulos/                    # Lógica de negócio (alunos, pagamentos, presenças, privacidade...)
 ├── projeto_ginasio/            # Configuração, base de dados, câmara e Face ID
-├── empacotar/                  # Criação do executável (PyInstaller)
 ├── run_gui.py                  # Ponto de entrada
 ├── run.bat                     # Inicialização rápida no Windows
 ├── requirements.txt            # Dependências Python
