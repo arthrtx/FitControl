@@ -1,75 +1,76 @@
-# FitControl V4
+# FitControl V5
 
-FitControl V4 é uma aplicação de gestão de academias desenvolvida em Python com CustomTkinter. O sistema permite gerir alunos, funcionários, planos, pagamentos e presenças através de uma interface moderna e intuitiva, com reconhecimento facial integrado.
+FitControl é uma aplicação de gestão de academias desenvolvida em Python com CustomTkinter. O sistema permite gerir alunos, funcionários, planos, pagamentos e presenças através de uma interface moderna, com modo claro e escuro, reconhecimento facial integrado e cumprimento do RGPD.
 
 ## Funcionalidades
 
-- Autenticação de utilizadores com diferentes níveis de acesso.
-- Gestão de alunos e funcionários.
-- Registo e gestão de planos.
-- Controlo de pagamentos e mensalidades.
-- Registo de presenças.
+- Autenticação de utilizadores com níveis de acesso (administrador e funcionário) e bloqueio após 3 tentativas falhadas.
+- Gestão de alunos com fotografia, filtros, pesquisa sem acentos e ficha com o histórico de mensalidades.
+- Planos Diário, Mensal, Trimestral e Anual.
+- Controlo de pagamentos e mensalidades em atraso, com notificações.
+- Registo de presenças por Face ID ou manual.
 - Dashboard com estatísticas e gráficos em tempo real.
-- **Modo claro e modo escuro**, alternáveis pelo botão no canto superior direito.
-- Sistema de histórico e arquivo de dados.
-- Reconhecimento facial (Face ID) com modelo embutido (funciona offline).
-- Base de dados SQLite (auto-criada e vazia na primeira execução).
+- Relatório mensal em PDF.
+- Arquivo de presenças e de alunos, com restauro e apagamento definitivo.
+- Registos de administração (logins, alterações, pedidos RGPD).
+- **Modo claro e modo escuro**, alternáveis no botão sol/lua do canto superior direito.
+- Termos de Utilização e Política de Privacidade (RGPD) aceites no login.
+- Base de dados SQLite criada automaticamente na primeira execução.
 
-## Novidades
+## Novidades da versão 5.0
 
-### Modo claro (novo)
+### Interface nova
+- **Redesenho completo**: menu lateral com indicador luminoso e opção de recolher, painel principal arredondado com fundo em degradê e faixa de boas-vindas com atalhos.
+- **Dashboard em vidro fosco**: cartões desfocados por cima do degradê, linhas de LEDs (alunos em dia, presenças dos últimos 14 dias, receita, equipa), medidor das mensalidades, linha das entradas dos últimos 30 dias e barras da receita mensal. Passando o rato aparece o valor.
+- **Gráficos desenhados pela própria aplicação** (deixou de ser preciso o matplotlib).
+- **Tabelas** com linhas alternadas, ordenação ao clicar no cabeçalho e filtros (Em dia / Em atraso / Sem pagamento).
+- **Pesquisa de alunos** nos pagamentos e presenças (escreve-se o nome em vez de procurar numa lista enorme).
+- **Câmara dentro da aplicação**: o Face ID, a fotografia do aluno e o teste da câmara aparecem na própria janela.
+- **Avisos rápidos** no canto da janela em vez de caixas de mensagem para tudo.
+- Login mais pequeno e janelas sempre centradas no ecrã; os botões ajustam-se a ecrãs com escala do Windows (125%, 150%).
 
-- **Tema claro**: a aplicação passa a ter dois temas, claro e escuro. O botão ** Modo claro** / ** Modo escuro** no canto superior direito alterna entre os dois a qualquer momento.
-- Cartões, gráficos, tabelas e botões acompanham o tema escolhido.
-- Antes, a interface tinha apenas o tema escuro fixo.
+### Desempenho
+- A troca de tema é instantânea e a janela já não pisca; a barra de título acompanha o tema.
+- A página Presenças abria com 4 s de bloqueio: o reconhecimento facial passou a carregar em segundo plano.
+- Corrigido um ciclo infinito de redesenho nas tabelas e gráficos ~8× mais rápidos.
+- Páginas só são criadas quando se abrem e o dashboard só redesenha quando os dados mudam.
 
-### Relatório PDF (novo)
+### RGPD
+- **Termos de Utilização e Política de Privacidade** reescritos (arts. 13.º e 9.º do RGPD, Lei 58/2019, CNPD). Cada utilizador aceita-os no primeiro login e sempre que mudarem de versão; a aceitação fica registada.
+- **Consentimento facial explícito**: a foto do aluno só é tirada com consentimento, que pode ser retirado ao editar o aluno (a foto e o modelo facial são apagados).
+- **Exportar dados do aluno** (direito de acesso e portabilidade) em JSON.
+- **Apagar definitivamente** um aluno do arquivo (direito ao apagamento). Os alunos com mais de 60 dias no arquivo são apagados da base de dados.
+- **Palavras-passe cifradas** (PBKDF2). As contas antigas são convertidas automaticamente.
+- Registos com mais de 2 anos são apagados automaticamente.
 
-- **Relatório PDF**: a aplicação passa a gerar um relatório em PDF do mês selecionado, com escolha do período, cabeçalho, cartões de resumo, tabelas, paginação e rodapé.
-- **Resumo por plano**: para além do total e do valor médio pago, o relatório apresenta a quantidade e o total pago agrupados por plano.
-- Novo módulo `modulos/relatorios.py` e dependência `reportlab`.
+### Face ID mais fiável
+- Funciona em pastas com acentos (ex.: `C:\Users\João\...`).
+- A imagem já não é deformada antes do reconhecimento e a comparação é mais tolerante com webcams fracas.
+- Se o DirectShow não funcionar, a câmara é aberta pelo Media Foundation, e usa a câmara e a resolução escolhidas na página Câmara.
+- Só carrega os modelos de deteção e reconhecimento (mais rápido e menos memória).
+- Os erros (sem câmara, sem alunos com foto, etc.) aparecem no ecrã em vez de o Face ID ficar parado em "A preparar".
 
-### Termos de Utilização e Notificações (novo)
-
-- **Aceitação dos Termos de Utilização no login**: no primeiro acesso do administrador temporário, os termos têm de ser aceites antes de entrar.
-- **Aviso de notificações** para o aluno, com módulo próprio `modulos/notificacoes.py`.
-
-### Fotografia
-
-- **Tirar nova foto ao editar um aluno**: no formulário de edição existe a opção **📷 Tirar nova foto ao guardar**. A referência facial é recalculada e guardada automaticamente.
-- Se a captura for cancelada, a foto existente é mantida e a edição continua.
-
-### Correções de estabilidade
-
-- **Eliminação de alunos**: eliminar um aluno deixava a aplicação bloqueada. A causa era `gerar_id()` reutilizar o identificador de um aluno que já estava no arquivo de exclusão, o que gerava um conflito na tabela `alunos_excluidos` e deixava a base de dados bloqueada em todas as escritas seguintes.
-- **Identificadores únicos**: os novos alunos já não reaproveitam o número de um aluno arquivado.
-- **Fecho das ligações SQLite**: as ligações da base de dados passaram a ser fechadas mesmo quando ocorre um erro, libertando o bloqueio.
-- **Erros visíveis**: se uma eliminação falhar, é apresentada uma mensagem de erro em vez de a aplicação ficar aparentemente congelada.
-- **Pesquisa sem acentos**: na área de pagamentos, a pesquisa por nome e o seletor de aluno passaram a ignorar acentos, para que por exemplo `sao` encontre `São`.
-- **Instalação automática**: o `run.bat` passa a detetar o Python, criar o ambiente virtual e instalar as dependências automaticamente.
-
-## Novidades desta versão (Edição Portátil)
-
-- **Versão portátil pronta a usar**: um único ficheiro `FitControl.exe` com todas as dependências (Python, OpenCV, modelo facial e bibliotecas) embutidas. Basta descarregar e executar — **não requer instalação nem internet**.
-- **Face ID corrigido e validado de ponta a ponta**: o modelo de reconhecimento (insightface `buffalo_l`) e os dados auxiliares do insightface ficam embutidos no executável, eliminando os erros que impediam o Face ID de funcionar fora do ambiente de desenvolvimento.
-- **Base de Dados começa vazia**: a primeira execução cria automaticamente uma base de dados limpa (estado de fábrica), pronta para registar a sua academia.
-- **Aviso do administrador temporário**: no primeiro login é alertado para alterar os dados da conta temporária ou criar outra conta de administrador; o aviso desaparece assim que o fizer.
-- Executável gerado com o **PyInstaller (onefile)** e testado: login, painel principal e reconhecimento facial validados no executável final.
+### Executável e run.bat
+- Executável novo em pasta (arranca muito mais rápido do que o ficheiro único da V4.2), com o modelo do Face ID e o runtime do Visual C++ incluídos.
+- Os dados ficam na pasta `dados`, ao lado do executável.
+- `empacotar\construir.bat` gera o executável a partir do código.
+- `run.bat` corrigido: fins de linha do Windows, deteção do Python 3.12+ de 64 bits, reinstalação das dependências quando o `requirements.txt` muda.
 
 ## Como executar
 
 ### Opção 1 — Executável (recomendada)
 
-1. Vá à secção **Releases** deste repositório e descarregue **`FitControl.exe`**.
-2. Guarde-o em qualquer pasta (ex.: Área de Trabalho ou Documentos).
-3. Faça duplo clique em **FitControl.exe**.
+1. Vá à secção **Releases** deste repositório e descarregue **`FitControl-V5.0-Windows.zip`**.
+2. Extraia o zip para qualquer pasta (ex.: Área de Trabalho ou Documentos).
+3. Abra a pasta `FitControl` e faça duplo clique em **FitControl.exe**.
 
-> Requisitos: Windows 10 ou Windows 11 (64 bits). Câmera (apenas para o Face ID).
-> Não precisa de instalar Python nem qualquer biblioteca.
+> Requisitos: Windows 10 ou Windows 11 (64 bits). Câmara (apenas para o Face ID).
+> Não precisa de instalar Python, bibliotecas nem internet: o modelo do Face ID já vai incluído.
+> Para mudar de computador, basta copiar a pasta `FitControl` inteira (os dados vão na pasta `dados`).
 
 ### Opção 2 — A partir do código-fonte
 
-1. Instale o Python 3.11 ou superior (64 bits).
+1. Instale o Python 3.12 ou superior (64 bits).
 2. Num terminal, dentro da pasta do projeto:
 
 ```bash
@@ -79,7 +80,12 @@ pip install -r requirements.txt
 python run_gui.py
 ```
 
-Também pode simplesmente executar o **`run.bat`** (usa/cria o ambiente virtual e inicia a aplicação).
+Também pode simplesmente executar o **`run.bat`** (instala o Python se for preciso, cria o ambiente virtual e inicia a aplicação).
+
+### Criar o executável
+
+Com o `run.bat` já usado pelo menos uma vez (e o Face ID aberto uma vez, para o modelo estar descarregado), execute **`empacotar\construir.bat`**.
+O executável é criado na pasta `FitControl`, ao lado da pasta do projeto, sem apagar a pasta `dados` de uma versão anterior.
 
 ### Primeiro acesso
 
@@ -92,12 +98,28 @@ Este é o **administrador temporário**. Após entrar, altere os dados dessa con
 
 ### Reconhecimento facial (Face ID)
 
-1. Crie um aluno e associe uma **foto** (o sistema gera a referência facial).
-2. Abra a página **Presenças** e clique em **Iniciar Face ID**.
-3. Coloque o rosto em frente à câmera: quando reconhecido, a presença é registada automaticamente.
-4. Para terminar, pressione **Q** na janela do Face ID (ou feche a janela).
+1. Ao criar o aluno, marque o **consentimento para reconhecimento facial** e tire a foto na janela que aparece.
+2. Abra a página **Presenças** e clique em **Iniciar Face ID** (a imagem da câmara aparece na própria página).
+3. Coloque o rosto em frente à câmara: quando reconhecido, a presença é registada automaticamente.
+4. Para terminar, clique em **Parar** (ou mude de página).
 
-> Sem alunos com foto cadastrados, o Face ID mostra "Sem embeddings registados".
+> A partir do código-fonte, na primeira utilização é preciso internet para descarregar o modelo facial (cerca de 280 MB). No executável o modelo já vem incluído.
+> Sem alunos com foto, o Face ID mostra "Sem rostos registados".
+
+## Versões anteriores
+
+### V4.2 — Edição Portátil
+- Executável único `FitControl.exe` com todas as dependências embutidas.
+- **Modo claro**: primeira versão com tema claro e escuro.
+- **Relatório PDF** do mês selecionado, com resumo por plano.
+- **Termos de Utilização** no primeiro login e centro de **notificações**.
+- **Tirar nova foto ao editar um aluno**, com a referência facial recalculada.
+- Correção do bloqueio da base de dados ao eliminar alunos (identificadores reaproveitados do arquivo) e pesquisa sem acentos nos pagamentos.
+
+### V4.1 — Edição Portátil
+- Face ID corrigido e validado de ponta a ponta, com o modelo `buffalo_l` embutido.
+- Base de dados vazia criada automaticamente na primeira execução.
+- Aviso do administrador temporário no primeiro login.
 
 ## Tecnologias
 
@@ -105,8 +127,8 @@ Este é o **administrador temporário**. Após entrar, altere os dados dessa con
 - CustomTkinter / Tkinter
 - OpenCV
 - insightface / onnxruntime
-- Matplotlib
-- Pillow
+- Pillow / NumPy
+- ReportLab
 - SQLite
 - PyInstaller (empacotamento)
 
@@ -115,9 +137,11 @@ Este é o **administrador temporário**. Após entrar, altere os dados dessa con
 ```
 FitControl/
 │
-├── interface_grafica/          # Interface (login, app, dialogs, widgets)
-├── modulos/                    # Lógica de negócio (alunos, pagamentos, presenças...)
-├── projeto_ginasio/            # Configuração, Base de Dados, câmera e Face ID
+├── interface_grafica/          # Interface (login, janela principal, diálogos, widgets, gráficos)
+│   └── paginas/                # Dashboard, Alunos, Pagamentos, Presenças, Arquivos, Sistema, Câmara
+├── modulos/                    # Lógica de negócio (alunos, pagamentos, presenças, privacidade...)
+├── projeto_ginasio/            # Configuração, base de dados, câmara e Face ID
+├── empacotar/                  # Criação do executável (PyInstaller)
 ├── run_gui.py                  # Ponto de entrada
 ├── run.bat                     # Inicialização rápida no Windows
 ├── requirements.txt            # Dependências Python
