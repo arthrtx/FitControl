@@ -14,7 +14,7 @@ projeto_ginasio/dados/
 *.db
 *.db-journal
 *.log
-config_camera.json
+camera_config.json
 
 # Edições e IDEs
 .vscode/
@@ -24,6 +24,7 @@ config_camera.json
 build/
 dist/
 *.spec
+!empacotar/FitControl.spec
 
 # Scripts de desenvolvimento
 check_db.py
