@@ -1,4 +1,7 @@
 from datetime import datetime
+import hashlib
+import hmac
+import os
 
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import funcionarios
@@ -25,6 +28,57 @@ def guardar_funcionarios():
 
 
 # ======================================================
+# palavras-passe
+# ======================================================
+# as palavras-passe deixam de ficar em texto simples na base de dados
+# (RGPD art. 32.º - segurança do tratamento)
+ITERACOES = 120000
+
+
+def cifrar_senha(senha):
+
+    sal = os.urandom(16)
+    chave = hashlib.pbkdf2_hmac("sha256", senha.encode("utf-8"), sal, ITERACOES)
+
+    return f"pbkdf2${ITERACOES}${sal.hex()}${chave.hex()}"
+
+
+def senha_cifrada(valor):
+
+    return str(valor or "").startswith("pbkdf2$")
+
+
+def senha_correta(guardada, escrita):
+
+    if not guardada:
+        return False
+
+    # contas antigas ainda com a palavra-passe em texto simples
+    if not senha_cifrada(guardada):
+        return hmac.compare_digest(str(guardada), str(escrita))
+
+    try:
+        _, iteracoes, sal, chave = guardada.split("$")
+        nova = hashlib.pbkdf2_hmac(
+            "sha256", str(escrita).encode("utf-8"), bytes.fromhex(sal), int(iteracoes)
+        )
+    except ValueError:
+        return False
+
+    return hmac.compare_digest(nova.hex(), chave)
+
+
+def proteger_senhas_antigas():
+
+    for funcionario in funcionarios:
+
+        if not senha_cifrada(funcionario["senha"]):
+
+            funcionario["senha"] = cifrar_senha(funcionario["senha"])
+            update_funcionario(funcionario)
+
+
+# ======================================================
 # carregar funcionários
 # ======================================================
 def carregar_funcionarios():
@@ -34,7 +88,7 @@ def carregar_funcionarios():
             "id": 1,
             "nome": "Administrador Temporário",
             "usuario": "adm",
-            "senha": "adm",
+            "senha": cifrar_senha("adm"),
             "tipo": "Administrador",
             "temporario": True
         })
@@ -120,7 +174,7 @@ def criar_funcionario(nome, usuario, senha, tipo):
 
         "usuario": usuario,
 
-        "senha": senha,
+        "senha": cifrar_senha(senha),
 
         "tipo": tipo,
 
@@ -165,8 +219,7 @@ def editar_funcionario(id_funcionario, nome, usuario, senha, tipo):
     if usuario == "":
         return False
 
-    if senha == "":
-        return False
+    # palavra-passe vazia = manter a atual
 
     for funcionario in funcionarios:
 
@@ -183,7 +236,8 @@ def editar_funcionario(id_funcionario, nome, usuario, senha, tipo):
 
             funcionario["nome"] = nome
             funcionario["usuario"] = usuario
-            funcionario["senha"] = senha
+            if senha:
+                funcionario["senha"] = cifrar_senha(senha)
             funcionario["tipo"] = tipo
 
             funcionario["temporario"] = False
@@ -230,7 +284,7 @@ def alterar_senha(id_funcionario, senha):
 
         if funcionario["id"] == id_funcionario:
 
-            funcionario["senha"] = senha
+            funcionario["senha"] = cifrar_senha(senha)
 
             update_funcionario(funcionario)
 

@@ -167,33 +167,56 @@ def apagar_historico():
 
 # verificar mensalidades
 # ======================================================
+def _estado_pagamento(pagamento, hoje):
+
+    vencimento = pagamento["data_vencimento"]
+
+    if pagamento["plano"] == "Diário":
+
+        if pagamento["data_pagamento"] == hoje.strftime("%d/%m/%Y"):
+            return ("paga", vencimento)
+
+        return ("atrasada", vencimento)
+
+
+    data_vencimento = datetime.strptime(
+        vencimento,
+        "%d/%m/%Y"
+    )
+
+
+    if data_vencimento.date() >= hoje.date():
+        return ("paga", vencimento)
+
+    return ("atrasada", vencimento)
+
+
 def situacao_mensalidade(id_aluno):
 
     for pagamento in reversed(pagamentos):
 
         if pagamento["id_aluno"] == id_aluno:
 
-            vencimento = pagamento["data_vencimento"]
-
-            if pagamento["plano"] == "Diário":
-
-                if pagamento["data_pagamento"] == datetime.now().strftime("%d/%m/%Y"):
-                    return ("paga", vencimento)
-
-                return ("atrasada", vencimento)
-
-
-            data_vencimento = datetime.strptime(
-                vencimento,
-                "%d/%m/%Y"
-            )
-
-
-            if data_vencimento.date() >= datetime.now().date():
-                return ("paga", vencimento)
-
-            return ("atrasada", vencimento)
-
+            return _estado_pagamento(pagamento, datetime.now())
 
 
     return ("sem_pagamento", "")
+
+
+# situação de todos os alunos de uma vez (percorre os pagamentos só uma vez)
+# ======================================================
+def situacoes_mensalidade():
+
+    hoje = datetime.now()
+    situacoes = {}
+
+    for pagamento in reversed(pagamentos):
+
+        id_aluno = pagamento["id_aluno"]
+
+        if id_aluno in situacoes:
+            continue
+
+        situacoes[id_aluno] = _estado_pagamento(pagamento, hoje)
+
+    return situacoes

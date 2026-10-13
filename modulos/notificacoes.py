@@ -8,14 +8,15 @@ from projeto_ginasio.db_adapter import (
     apagar_notificacao,
     apagar_notificacoes_lidas,
 )
-from modulos.pagamentos import situacao_mensalidade
+from modulos.pagamentos import situacoes_mensalidade
 
 
 def verificar():
     atuais = {}
+    situacoes = situacoes_mensalidade()
 
     for aluno in alunos:
-        estado, vencimento = situacao_mensalidade(aluno["id"])
+        estado, vencimento = situacoes.get(aluno["id"], ("sem_pagamento", ""))
         id_aluno = aluno["id"]
         nome = aluno["nome"]
 

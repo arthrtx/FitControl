@@ -1,7 +1,7 @@
 """Adaptador para migrar o sistema de arquivos JSON para SQLite mantendo compatibilidade."""
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from projeto_ginasio.database import _get_connection, migrate_from_json
 from projeto_ginasio.config import DADOS
 import os
@@ -502,3 +502,63 @@ def apagar_notificacoes_lidas():
     cursor.execute('DELETE FROM notificacoes WHERE lida=1')
     conn.commit()
     conn.close()
+
+# Termos de utilização aceites
+def get_termos_aceites(usuario):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM termos_aceites WHERE lower(usuario)=lower(?)', (usuario,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_todos_termos_aceites():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM termos_aceites')
+    registos = {row['usuario'].lower(): dict(row) for row in cursor.fetchall()}
+    conn.close()
+    return registos
+
+def registar_termos_aceites(usuario, versao):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    data = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    cursor.execute('''
+        INSERT INTO termos_aceites (usuario, versao, data) VALUES (?, ?, ?)
+        ON CONFLICT(usuario) DO UPDATE SET versao=excluded.versao, data=excluded.data
+    ''', (usuario, versao, data))
+    conn.commit()
+    conn.close()
+
+# Presenças por dia (a partir dos logs, que guardam o histórico todo)
+def contar_presencas_por_dia():
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT substr(data, 1, 10) AS dia, COUNT(*) AS total FROM logs "
+        "WHERE tipo='presenca' GROUP BY dia"
+    )
+    contagem = {row['dia']: row['total'] for row in cursor.fetchall()}
+    conn.close()
+    return contagem
+
+def apagar_logs_antigos(dias):
+    """Apaga os logs com mais de 'dias' dias. Devolve quantos saíram."""
+    limite = datetime.now() - timedelta(days=dias)
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, data FROM logs')
+    antigos = []
+    for row in cursor.fetchall():
+        try:
+            data = datetime.strptime(row['data'][:10], "%d/%m/%Y")
+        except (ValueError, TypeError):
+            continue
+        if data < limite:
+            antigos.append((row['id'],))
+    if antigos:
+        cursor.executemany('DELETE FROM logs WHERE id=?', antigos)
+        conn.commit()
+    conn.close()
+    return len(antigos)

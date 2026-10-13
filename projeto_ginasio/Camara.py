@@ -1,7 +1,10 @@
 import cv2 as cv
 import os
+import sys
 import json
 from datetime import datetime
+
+import numpy as np
 
 from projeto_ginasio.config import (
     PASTA_CAPTURAS,
@@ -14,6 +17,29 @@ CAMINHO_CONFIG_CAMERA = os.path.join(os.path.dirname(PASTA_FACES), "camera_confi
 
 _CASCADE_PATH = cv.data.haarcascades + "haarcascade_frontalface_default.xml"
 _face_cascade = cv.CascadeClassifier(_CASCADE_PATH)
+
+
+# ---------- Ler / gravar imagens ----------
+# o cv.imread / cv.imwrite falham em silêncio quando o caminho tem acentos
+# (ex.: C:\Users\João\...). Assim lemos/gravamos os bytes pelo Python.
+
+def ler_imagem(caminho):
+    try:
+        dados = np.fromfile(caminho, dtype=np.uint8)
+    except OSError:
+        return None
+    if dados.size == 0:
+        return None
+    return cv.imdecode(dados, cv.IMREAD_COLOR)
+
+
+def guardar_imagem(caminho, frame):
+    extensao = os.path.splitext(caminho)[1] or ".jpg"
+    ok, dados = cv.imencode(extensao, frame)
+    if not ok:
+        return False
+    dados.tofile(caminho)
+    return True
 
 
 # ---------- Configuração persistente ----------
@@ -52,16 +78,27 @@ def obter_indice_camera():
 
 # ---------- Deteção de câmaras disponíveis ----------
 
+def _backends():
+    # nem todas as webcams funcionam com o DirectShow, por isso tenta-se
+    # o Media Foundation e depois o que o OpenCV escolher
+    if sys.platform.startswith("win"):
+        return [cv.CAP_DSHOW, cv.CAP_MSMF, cv.CAP_ANY]
+    return [cv.CAP_ANY]
+
+
 def listar_cameras(max_indices=5):
     disponiveis = []
     for i in range(max_indices):
-        try:
-            cam = cv.VideoCapture(i, cv.CAP_DSHOW)
-            if cam.isOpened():
+        for backend in _backends():
+            try:
+                cam = cv.VideoCapture(i, backend)
+                aberta = cam.isOpened()
+                cam.release()
+            except Exception:
+                aberta = False
+            if aberta:
                 disponiveis.append(i)
-            cam.release()
-        except Exception:
-            pass
+                break
     return disponiveis
 
 
@@ -71,18 +108,50 @@ def abrir_captura(indice_camera=None, largura=None, altura=None):
     largura = largura if largura is not None else config["largura"]
     altura = altura if altura is not None else config["altura"]
 
-    camera = cv.VideoCapture(indice, cv.CAP_DSHOW)
-    if camera.isOpened():
+    for backend in _backends():
+        try:
+            camera = cv.VideoCapture(indice, backend)
+        except Exception:
+            continue
+
+        if not camera.isOpened():
+            camera.release()
+            continue
+
         camera.set(cv.CAP_PROP_FRAME_WIDTH, largura)
         camera.set(cv.CAP_PROP_FRAME_HEIGHT, altura)
-    return camera
+        camera.set(cv.CAP_PROP_BUFFERSIZE, 1)
+
+        # algumas câmaras abrem mas não devolvem imagem com este backend
+        for _ in range(10):
+            sucesso, _frame = camera.read()
+            if sucesso:
+                return camera
+
+        camera.release()
+
+    return cv.VideoCapture()
 
 
 # ---------- Deteção de rosto (guia visual) ----------
 
 def detetar_rostos(frame):
-    cinza = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-    return _face_cascade.detectMultiScale(cinza, scaleFactor=1.1, minNeighbors=5, minSize=(80, 80))
+    """Deteção em imagem reduzida (muito mais barato para a CPU) e caixas
+    devolvidas nas coordenadas do frame original, como antes."""
+    altura, largura = frame.shape[:2]
+    escala = 1.0
+    imagem = frame
+    if largura > 480:
+        escala = 480 / largura
+        imagem = cv.resize(frame, (480, max(int(altura * escala), 1)), interpolation=cv.INTER_AREA)
+    cinza = cv.cvtColor(imagem, cv.COLOR_BGR2GRAY)
+    minimo = max(int(80 * escala), 24)
+    caixas = _face_cascade.detectMultiScale(
+        cinza, scaleFactor=1.1, minNeighbors=5, minSize=(minimo, minimo)
+    )
+    if len(caixas) and escala != 1.0:
+        caixas = (caixas / escala).astype(np.int32)
+    return caixas
 
 
 def desenhar_moldura_rosto(frame, cor=(0, 200, 0)):
@@ -120,7 +189,7 @@ def tirarFoto(usuario, indice_camera=None):
         tecla = cv.waitKey(1) & 0xFF
         if tecla == ord("p"):
             caminho = os.path.join(PASTA_FACES, f"{usuario}.jpg")
-            cv.imwrite(caminho, frame)
+            guardar_imagem(caminho, frame)
             caminho_final = caminho
             break
         elif tecla == ord("q"):
@@ -161,7 +230,7 @@ def registarPresenca(usuario, indice_camera=None):
         if tecla == ord("p") and tem_rosto:
             nome = f"{usuario}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
             caminho = os.path.join(PASTA_CAPTURAS, nome)
-            cv.imwrite(caminho, frame)
+            guardar_imagem(caminho, frame)
             caminho_final = caminho
             break
         elif tecla == ord("q"):

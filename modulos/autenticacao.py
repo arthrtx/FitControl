@@ -25,15 +25,25 @@ def carregar_funcionarios():
     # Os funcionários são carregados do SQLite
     funcionarios = get_funcionarios()
 
-    # CRIAR ADMIN TEMPORÁRIO SE NÃO EXISTIR
-    if not procurar_utilizador("adm"):
+    # CRIAR ADMIN TEMPORÁRIO SE NÃO EXISTIR NENHUM ADMINISTRADOR
+    # (antes bastava mudar o utilizador "adm" para ele voltar a ser criado
+    # com adm/adm, o que deixava uma porta aberta)
+    tem_admin = False
+    for utilizador in funcionarios:
+        if utilizador["tipo"] == "Administrador":
+            tem_admin = True
+            break
+
+    if not tem_admin:
         gestao_funcionarios.criar_funcionario(
             nome="Administrador Temporário",
             usuario="adm",
             senha="adm",
             tipo="Administrador",
         )
-        funcionarios = get_funcionarios()
+
+    gestao_funcionarios.proteger_senhas_antigas()
+    funcionarios = get_funcionarios()
 
 
 # LOGS (escritos na tabela SQLite 'logs', tipo 'administracao')
@@ -70,7 +80,7 @@ def e_admin_temporario(utilizador):
         return False
     return (
         str(utilizador.get("usuario", "")).lower() == "adm"
-        and utilizador.get("senha") == "adm"
+        and gestao_funcionarios.senha_correta(utilizador.get("senha"), "adm")
         and utilizador.get("nome") == "Administrador Temporário"
     )
 
@@ -160,7 +170,7 @@ def autenticar(usuario, senha):
         escrever_log(f"Login inválido: {usuario}")
         return (False, "Utilizador inexistente.", None)
 
-    if utilizador["senha"] != senha:
+    if not gestao_funcionarios.senha_correta(utilizador["senha"], senha):
         registar_tentativa_falhada(usuario)
         escrever_log(f"senha incorreta: {usuario}")
         restantes = (

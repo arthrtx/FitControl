@@ -21,6 +21,15 @@ TABELA_NOTIFICACOES = '''
     )
 '''
 
+# quem aceitou que versão dos Termos / Política de Privacidade (RGPD art. 7.º)
+TABELA_TERMOS = '''
+    CREATE TABLE IF NOT EXISTS termos_aceites (
+        usuario TEXT PRIMARY KEY,
+        versao TEXT NOT NULL,
+        data TEXT NOT NULL
+    )
+'''
+
 
 def _get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -107,6 +116,7 @@ def _init_database():
     ''')
 
     cursor.execute(TABELA_NOTIFICACOES)
+    cursor.execute(TABELA_TERMOS)
 
     conn.commit()
     conn.close()
@@ -137,6 +147,7 @@ def _migrar_esquema():
 
     try:
         cursor.execute(TABELA_NOTIFICACOES)
+        cursor.execute(TABELA_TERMOS)
     except Exception as e:
         print(f"Não foi possível criar as tabelas novas: {e}")
 

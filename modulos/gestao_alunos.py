@@ -1,10 +1,10 @@
 from datetime import datetime, timedelta
+import os
+import shutil
 
-import cv2
 import numpy as np
-import insightface
 
-from projeto_ginasio.Camara import tirarFoto
+from projeto_ginasio.Camara import ler_imagem
 from projeto_ginasio.config import *
 from projeto_ginasio.dados import alunos, alunos_excluidos
 from projeto_ginasio.db_adapter import (
@@ -16,30 +16,29 @@ def gerar_embedding(caminho_foto):
 
     try:
 
-        ia = insightface.app.FaceAnalysis()
+        # usa o mesmo modelo do Face ID (carregado uma vez só e com a pasta
+        # certa dos modelos, também no executável)
+        from projeto_ginasio.reconhecimento.reconhecimento import carregar_modelo, maior_rosto
 
-        ia.prepare(
-            ctx_id=-1,
-            det_size=(320,320)
-        )
+        ia = carregar_modelo()
 
 
-        imagem = cv2.imread(caminho_foto)
+        imagem = ler_imagem(caminho_foto)
 
 
         if imagem is None:
             return None
 
 
-        rostos = ia.get(imagem)
+        rosto = maior_rosto(ia.get(imagem))
 
 
-        if len(rostos) == 0:
+        if rosto is None:
             print("Nenhum rosto encontrado.")
             return None
 
 
-        embedding = rostos[0].embedding
+        embedding = rosto.embedding
 
 
         embedding = embedding / np.linalg.norm(embedding)
@@ -55,6 +54,30 @@ def gerar_embedding(caminho_foto):
         )
 
         return None
+
+
+# fotos
+# ======================================================
+def guardar_foto(origem, id_aluno):
+
+    destino = os.path.join(PASTA_FACES, f"{id_aluno}.jpg")
+
+    if os.path.abspath(origem) != os.path.abspath(destino):
+        shutil.move(origem, destino)
+
+    return destino
+
+
+def apagar_foto(caminho):
+
+    if not caminho or caminho == "sem_foto":
+        return
+
+    try:
+        if os.path.exists(caminho):
+            os.remove(caminho)
+    except OSError as erro:
+        print(f"Não foi possível apagar a foto: {erro}")
 
 # inicialização
 # ======================================================
@@ -116,7 +139,7 @@ def documento_existe(documento):
 
 # criar alunos
 # ======================================================
-def criar_aluno(nome, telemovel, documento, plano):
+def criar_aluno(nome, telemovel, documento, plano, foto=None):
 #regras============================
     nome = nome.strip()
     telemovel = telemovel.strip()
@@ -155,24 +178,16 @@ def criar_aluno(nome, telemovel, documento, plano):
         return "Erro: Já existe um aluno com este documento."
 
 
-    try:
-
-        caminho_foto = tirarFoto(str(id_aluno))
-
-
-    except Exception:
-
-        caminho_foto = None
-
-
-
-    if not caminho_foto:
+    # a foto só chega aqui se o aluno deu consentimento para o Face ID
+    if not foto:
 
         caminho_foto = "sem_foto"
         embedding = None
 
 
     else:
+
+        caminho_foto = guardar_foto(foto, id_aluno)
 
         embedding = gerar_embedding(
             caminho_foto
@@ -193,6 +208,9 @@ def criar_aluno(nome, telemovel, documento, plano):
     alunos.append(novo_aluno)
     escrever_log(f"Aluno '{nome}' registado.", tipo="aluno")
 
+    if foto:
+        escrever_log(f"Consentimento facial dado por '{nome}'.", tipo="aluno")
+
     return True
 
 
@@ -208,7 +226,7 @@ def listar_alunos():
 
 # editar alunos
 # ======================================================
-def editar_aluno(id_aluno, nome, telemovel, documento, plano, nova_foto=False):
+def editar_aluno(id_aluno, nome, telemovel, documento, plano, nova_foto=None, remover_foto=False):
 #regras============================
     nome = nome.strip()
     telemovel = telemovel.strip()
@@ -253,22 +271,24 @@ def editar_aluno(id_aluno, nome, telemovel, documento, plano, nova_foto=False):
 
             if nova_foto:
 
-                try:
+                caminho_foto = guardar_foto(nova_foto, id_aluno)
 
-                    caminho_foto = tirarFoto(str(id_aluno))
+                embedding = gerar_embedding(
+                    caminho_foto
+                )
 
-                except Exception:
+                aluno["foto"] = caminho_foto
+                aluno["embedding"] = embedding
 
-                    caminho_foto = None
+            elif remover_foto:
 
-                if caminho_foto:
+                # consentimento retirado: sai a foto e o modelo facial
+                apagar_foto(aluno.get("foto"))
 
-                    embedding = gerar_embedding(
-                        caminho_foto
-                    )
+                aluno["foto"] = "sem_foto"
+                aluno["embedding"] = None
 
-                    aluno["foto"] = caminho_foto
-                    aluno["embedding"] = embedding
+                escrever_log(f"Consentimento facial retirado por '{nome}'.", tipo="aluno")
 
 
             aluno["nome"] = nome
@@ -395,6 +415,29 @@ def guardar_alunos_excluidos():
         raise Exception(f"Não foi possível guardar alunos excluídos: {erro}")
 
 
+# apagar definitivamente (direito ao apagamento)
+# ======================================================
+def apagar_definitivamente(id_aluno):
+
+    for aluno in alunos_excluidos:
+
+        if aluno["id"] == id_aluno:
+
+            remove_aluno_excluido(id_aluno)
+            alunos_excluidos.remove(aluno)
+
+            apagar_foto(aluno.get("foto"))
+
+            escrever_log(
+                f"Dados do aluno ID {id_aluno} apagados definitivamente.",
+                tipo="aluno"
+            )
+
+            return True
+
+    return False
+
+
 # limpar alunos excluidos
 # ======================================================
 def limpar_alunos_expirados():
@@ -406,10 +449,13 @@ def limpar_alunos_expirados():
 
     for aluno in alunos_excluidos:
 
-        data = datetime.strptime(
-            aluno["data_exclusao"],
-            "%d/%m/%Y"
-        )
+        try:
+            data = datetime.strptime(
+                aluno["data_exclusao"],
+                "%d/%m/%Y"
+            )
+        except (ValueError, TypeError, KeyError):
+            continue
 
 
         if hoje - data >= timedelta(days=60):
@@ -417,16 +463,14 @@ def limpar_alunos_expirados():
             removidos.append(aluno)
 
 
+    # antes só saíam da lista em memória e voltavam a aparecer ao reabrir
     for aluno in removidos:
 
+        remove_aluno_excluido(aluno["id"])
         alunos_excluidos.remove(aluno)
+        apagar_foto(aluno.get("foto"))
 
         escrever_log(
-            f"Aluno '{aluno['nome']}' eliminado definitivamente após 60 dias.",
+            f"Aluno ID {aluno['id']} eliminado definitivamente após 60 dias.",
             tipo="aluno"
         )
-
-
-    if removidos:
-
-        guardar_alunos_excluidos()
