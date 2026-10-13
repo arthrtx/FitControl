@@ -1,2535 +1,505 @@
-"""
-Janela principal da interface gráfica — Sistema de Gestão de Academia.
-"""
+"""Janela principal do FitControl."""
+
 import threading
-from collections import defaultdict
-from datetime import datetime, timedelta
-from tkinter import messagebox, ttk
+import tkinter as tk
+from datetime import datetime
 
 import customtkinter as ctk
-import os
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-from PIL import Image
 
-import cv2 as cv
-
-from projeto_ginasio.dados import pagamentos as pagamentos_db, presencas as presencas_db
-from interface_grafica.constants import CORES, TEMA, alternar_tema, modo_tema
-from interface_grafica.dialogs import (
-    AlunoFormDialog,
-    FuncionarioFormDialog,
-    NotificacoesDialog,
-    RelatorioDialog,
+from interface_grafica.camera_ui import libertar_camera
+from interface_grafica.constants import TEMA, VERSAO, alternar_tema, escuro, modo_tema
+from interface_grafica.dialogs import NotificacoesDialog
+from interface_grafica.fundo import PainelFundo, Transparente
+from interface_grafica.icones import brilho, icone, logo_ctk
+from interface_grafica.janela import (
+    aplicar_tema_barra, cancelar_pendentes, centralizar, congelar, descongelar, limpar_rastreadores_ctk,
+    preparar_janela,
 )
-from interface_grafica import relatorio_pdf
-from interface_grafica.utils import aluno_por_id, nome_aluno, sem_acentos, setup_paths
-from interface_grafica.widgets import (
-    PageFrame,
-    PageHeader,
-    Sino,
-    SurfaceCard,
-    TablePanel,
-    btn_danger,
-    btn_primary,
-    btn_secondary,
-    styled_entry,
-    styled_option,
-)
+from interface_grafica.utils import iniciais, ler_preferencia, guardar_preferencia, setup_paths
+from interface_grafica.widgets import AlternadorTema, confirmar, estilo_tabela, fechar_listas, fonte, mensagem, rotulo
 
 setup_paths()
 
+from interface_grafica import face_id, paginas
+from modulos import notificacoes
+from modulos.autenticacao import e_admin_temporario, terminar_sessao
 from projeto_ginasio.main import inicializar
-import projeto_ginasio.Camara
-from modulos import estatistica, gestao_alunos, pagamentos, presencas, funcionarios as gestao_funcionarios, acessos, notificacoes, relatorios
-from projeto_ginasio.db_adapter import get_logs_por_tipo
 
-
-class DashboardData:
-    @staticmethod
-    def presencas_30_dias():
-        hoje = projeto_ginasio.Camara.datetime.now().date()
-        dias = [hoje - timedelta(days=i) for i in range(29, -1, -1)]
-        contagem = {dia: 0 for dia in dias}
-        for registo in presencas_db:
-            try:
-                data = projeto_ginasio.Camara.datetime.strptime(registo["data"], "%d/%m/%Y").date()
-            except (ValueError, KeyError):
-                continue
-            if data in contagem:
-                contagem[data] += 1
-        labels = [dia.strftime("%d/%m") for dia in dias]
-        return labels, [contagem[dia] for dia in dias]
-
-    @staticmethod
-    def receita_mensal():
-        agora = projeto_ginasio.Camara.datetime.now()
-        mes, ano = agora.month, agora.year
-        chaves = []
-        for _ in range(12):
-            chaves.append((mes, ano))
-            mes -= 1
-            if mes == 0:
-                mes, ano = 12, ano - 1
-        chaves.reverse()
-        totais = defaultdict(float)
-        for pagamento in pagamentos_db:
-            try:
-                data = projeto_ginasio.Camara.datetime.strptime(pagamento["data_pagamento"], "%d/%m/%Y")
-                totais[(data.month, data.year)] += float(pagamento.get("valor", 0))
-            except (ValueError, TypeError, KeyError):
-                continue
-        labels = [f"{m:02d}/{a % 100:02d}" for m, a in chaves]
-        return labels, [totais[chave] for chave in chaves]
-
-
-def _ease_out_cubic(t):
-    return 1 - (1 - min(max(t, 0), 1)) ** 3
-
-
-class MetricCard(ctk.CTkFrame):
-    def __init__(self, master, icon, title, color):
-        super().__init__(
-            master,
-            fg_color=TEMA["surface"],
-            corner_radius=16,
-            border_width=1,
-            border_color=TEMA["border"],
-        )
-        self._target = 0.0
-        self._display = 0.0
-        self._currency = False
-        self._job = None
-        self.grid_columnconfigure(0, weight=1)
-
-        top = ctk.CTkFrame(self, fg_color="transparent")
-        top.pack(fill="x", padx=16, pady=(14, 4))
-        ctk.CTkLabel(top, text=icon, font=ctk.CTkFont(size=18)).pack(side="left")
-        ctk.CTkLabel(
-            top,
-            text=title,
-            font=ctk.CTkFont(size=12),
-            text_color=TEMA["muted"],
-        ).pack(side="left", padx=(8, 0))
-
-        self.valor = ctk.CTkLabel(
-            self,
-            text="—",
-            font=ctk.CTkFont(size=28, weight="bold"),
-            text_color=color,
-            anchor="w",
-        )
-        self.valor.pack(fill="x", padx=16, pady=(0, 14))
-
-    def set_value(self, value, currency=False, animate=True):
-        self._currency = currency
-        self._target = float(value)
-        if not animate:
-            self.stop_animation()
-            self._display = self._target
-            self._render()
-            return
-        self.stop_animation()
-        self._tick()
-
-    def _tick(self):
-        if not self.winfo_exists() or not self.valor.winfo_exists():
-            self._job = None
-            return
-
-        diff = self._target - self._display
-        if abs(diff) < 0.05:
-            self._display = self._target
-            self._render()
-            self._job = None
-            return
-        self._display += diff * 0.22
-        self._render()
-        self._job = self.after(16, self._tick)
-
-    def _render(self):
-        if not self.winfo_exists() or not self.valor.winfo_exists():
-            return
-        if self._currency:
-            texto = f"{self._display:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
-        else:
-            texto = str(int(round(self._display)))
-        self.valor.configure(text=texto)
-
-    def stop_animation(self):
-        if self._job:
-            try:
-                self.after_cancel(self._job)
-            except Exception:
-                pass
-            finally:
-                self._job = None
-
-    def destroy(self):
-        self.stop_animation()
-        super().destroy()
-
-
-class ChartPanel(ctk.CTkFrame):
-    def __init__(self, master, title):
-        super().__init__(
-            master,
-            fg_color=TEMA["surface"],
-            corner_radius=16,
-            border_width=1,
-            border_color=TEMA["border"],
-        )
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-        self._anim = None
-
-        ctk.CTkLabel(
-            self,
-            text=title,
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=TEMA["text"],
-            anchor="w",
-        ).grid(row=0, column=0, sticky="w", padx=14, pady=(12, 0))
-
-        self.fig = Figure(facecolor=TEMA["surface"], tight_layout=True)
-        self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        widget = self.canvas.get_tk_widget()
-        widget.configure(bg=TEMA["surface"], highlightthickness=0)
-        widget.grid(row=1, column=0, sticky="nsew", padx=8, pady=(4, 8))
-        self.bind("<Configure>", self._on_resize)
-
-    def _on_resize(self, event):
-        if event.widget is not self or event.width < 80 or event.height < 80:
-            return
-        dpi = self.fig.get_dpi()
-        altura = max(event.height - 44, 60)
-        largura = max(event.width - 12, 60)
-        self.fig.set_size_inches(largura / dpi, altura / dpi, forward=True)
-        self.fig.subplots_adjust(left=0.12, right=0.96, top=0.88, bottom=0.18)
-        self.canvas.draw_idle()
-
-    def stop_animation(self):
-        if self._anim:
-            event_source = getattr(self._anim, "event_source", None)
-            if event_source is not None:
-                try:
-                    event_source.stop()
-                except Exception:
-                    pass
-            self._anim = None
-
-    def set_animation(self, anim):
-        self.stop_animation()
-        self._anim = anim
-
-
-class DashboardCharts:
-    @staticmethod
-    def _style_axes(ax):
-        ax.set_facecolor(TEMA["surface"])
-        ax.figure.patch.set_facecolor(TEMA["surface"])
-        ax.tick_params(colors=TEMA["muted"], labelsize=8, length=0)
-        ax.title.set_color(TEMA["text"])
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        ax.grid(True, axis="y", color=TEMA["border"], alpha=0.55, linewidth=0.6)
-        ax.set_axisbelow(True)
-
-    @classmethod
-    def barras_planos(cls, panel, labels, valores):
-        panel.ax.clear()
-        cls._style_axes(panel.ax)
-        maximo = max(valores) if valores and max(valores) > 0 else 1
-        cores = TEMA["chart"][: len(labels)]
-        panel.ax.bar(
-            labels,
-            valores,
-            color=cores,
-            width=0.58,
-            edgecolor="none",
-            zorder=3,
-        )
-        panel.ax.set_ylim(0, maximo * 1.18)
-        panel.ax.set_ylabel("Alunos", color=TEMA["muted"], fontsize=8)
-        panel.canvas.draw_idle()
-        panel.set_animation(None)
-
-    @classmethod
-    def linha_presencas(cls, panel, labels, valores):
-        panel.ax.clear()
-        cls._style_axes(panel.ax)
-        x = list(range(len(valores)))
-        maximo = max(valores) if valores and max(valores) > 0 else 1
-        panel.ax.plot(x, valores, color=TEMA["cyan"], linewidth=2.4, zorder=4)
-        panel.ax.fill_between(x, valores, color=TEMA["cyan"], alpha=0.12)
-        panel.ax.set_xlim(-0.5, len(valores) - 0.5)
-        panel.ax.set_ylim(0, maximo * 1.15)
-        panel.ax.set_ylabel("Entradas", color=TEMA["muted"], fontsize=8)
-        passo = max(1, len(labels) // 6)
-        panel.ax.set_xticks(x[::passo])
-        panel.ax.set_xticklabels(
-            [labels[i] for i in range(0, len(labels), passo)], rotation=35, ha="right"
-        )
-        panel.canvas.draw_idle()
-        panel.set_animation(None)
-
-    @classmethod
-    def donut_pagamentos(cls, panel, ok, atraso):
-        panel.ax.clear()
-        panel.ax.set_facecolor(TEMA["surface"])
-        panel.fig.patch.set_facecolor(TEMA["surface"])
-        total = ok + atraso
-        if total <= 0:
-            panel.ax.text(
-                0.5, 0.5, "Sem dados", ha="center", va="center",
-                color=TEMA["muted"], fontsize=11, transform=panel.ax.transAxes,
-            )
-            panel.ax.axis("off")
-            panel.canvas.draw_idle()
-            panel.set_animation(None)
-            return
-
-        cores = [TEMA["success"], TEMA["danger"]]
-        rotulos = ["Pagas", "Em atraso"]
-        wedges, _ = panel.ax.pie(
-            [ok, atraso],
-            colors=cores,
-            startangle=90,
-            wedgeprops=dict(width=0.52, edgecolor=TEMA["surface"], linewidth=2),
-        )
-        panel.ax.text(
-            0, 0, str(int(total)), ha="center", va="center",
-            fontsize=16, fontweight="bold", color=TEMA["text"],
-        )
-        panel.ax.legend(
-            wedges, rotulos, loc="center left", bbox_to_anchor=(1.02, 0.5),
-            frameon=False, labelcolor=TEMA["muted"], fontsize=8,
-        )
-        panel.ax.axis("equal")
-        panel.canvas.draw_idle()
-        panel.set_animation(None)
-
-    @classmethod
-    def receita_mensal(cls, panel, labels, valores):
-        panel.ax.clear()
-        cls._style_axes(panel.ax)
-        maximo = max(valores) if valores and max(valores) > 0 else 1
-        x = list(range(len(valores)))
-        panel.ax.bar(
-            x, valores, color=TEMA["accent"],
-            width=0.62, edgecolor="none", alpha=0.92, zorder=3,
-        )
-        panel.ax.plot(x, valores, color=TEMA["cyan"], linewidth=2, marker="o", markersize=3, zorder=4)
-        panel.ax.set_xlim(-0.6, len(valores) - 0.4)
-        panel.ax.set_ylim(0, maximo * 1.18)
-        panel.ax.set_ylabel("€", color=TEMA["muted"], fontsize=8)
-        passo = max(1, len(labels) // 6)
-        panel.ax.set_xticks(x[::passo])
-        panel.ax.set_xticklabels([labels[i] for i in range(0, len(labels), passo)], rotation=35, ha="right")
-        panel.canvas.draw_idle()
-        panel.set_animation(None)
-
-class AcademiaApp(ctk.CTk):
-    """Janela principal da aplicação."""
-
-    def __init__(self, utilizador):
-        self.utilizador = utilizador
-        self.admin = self.utilizador["tipo"] == "Administrador"
-        self.reabrir_login = False
-        super().__init__()
-
-        ctk.set_appearance_mode(modo_tema())
-        ctk.set_default_color_theme("blue")
-
-        self.title("FitControl — Gestão de Academia")
-        self.geometry("1100x700")
-        self.minsize(900, 680)
-        self.configure(fg_color=TEMA["bg"])
-
-        inicializar()
-
-        self._pagina_atual = None
-        self._botoes_nav = {}
-        self._dashboard_job = None
-        self._dashboard_clock_job = None
-        self._dashboard_refresh_ms = 12000
-        self._sino_job = None
-        self._sino_refresh_ms = 60000
-        self._face_id_thread = None
-        self._face_id_start_job = None
-        self._face_id_status_job = None
-        self.cards = {}
-        self._chart_panels = []
-        self.sino = Sino(self._abrir_notificacoes)
-        self.protocol("WM_DELETE_WINDOW", self._fechar_aplicacao)
-
-        self._criar_layout()
-        self._configurar_treeview()
-        self._mostrar_pagina("dashboard")
-        self._atualizar_sino()
-        self._agendar_sino()
-
-    def iniciar_face_id(self):
-        if self._pagina_atual != "presencas":
-            return
-
-        try:
-            from projeto_ginasio.reconhecimento.reconhecimento import (
-                iniciar_reconhecimento,
-                reconhecimento_ativo,
-            )
-
-            if reconhecimento_ativo():
-                return
-
-            if self._face_id_thread and self._face_id_thread.is_alive():
-                self._cancelar_arranque_face_id()
-                self._face_id_start_job = self.after(300, self.iniciar_face_id)
-                return
-
-            self._face_id_thread = threading.Thread(
-                target=iniciar_reconhecimento,
-                daemon=True
-            )
-            self._face_id_thread.start()
-
-            print("Face ID iniciado.")
-
-        except Exception as erro:
-            print(f"Erro ao iniciar Face ID: {erro}")
-
-    def parar_face_id(self):
-        self._cancelar_arranque_face_id()
-        try:
-            from projeto_ginasio.reconhecimento.reconhecimento import parar_reconhecimento
-
-            parar_reconhecimento()
-        except Exception as erro:
-            print(f"Erro ao parar Face ID: {erro}")
-
-        # Espera mesmo que o thread do Face ID termine antes de continuar.
-        # Só ele pode libertar a câmera em segurança (ver o comentário em
-        # parar_reconhecimento). Se não esperarmos aqui, quem chamou
-        # parar_face_id() pode logo a seguir tentar abrir a câmera (ex.: ao
-        # entrar na página Câmara) enquanto o thread anterior ainda está a
-        # meio de um camera.read() — e é isso que fazia a aplicação
-        # bloquear/fechar sozinha.
-        if self._face_id_thread and self._face_id_thread.is_alive():
-            self._face_id_thread.join(timeout=3.0)
-            if self._face_id_thread.is_alive():
-                print("Aviso: o thread do Face ID demorou a terminar.")
-
-    def _cancelar_arranque_face_id(self):
-        if self._face_id_start_job:
-            try:
-                self.after_cancel(self._face_id_start_job)
-            except Exception:
-                pass
-            finally:
-                self._face_id_start_job = None
-
-    def _agendar_estado_face_id(self):
-        self._cancelar_estado_face_id()
-        self._face_id_status_job = self.after(
-            400, self._atualizar_estado_face_id
-        )
-
-    def _cancelar_estado_face_id(self):
-        if self._face_id_status_job:
-            self.after_cancel(self._face_id_status_job)
-            self._face_id_status_job = None
-
-    def _agendar_relogio_dashboard(self):
-        self._cancelar_relogio_dashboard()
-        self._dashboard_clock_job = self.after(
-            1000, self._atualizar_relogio_dashboard
-        )
-
-    def _cancelar_relogio_dashboard(self):
-        if self._dashboard_clock_job:
-            self.after_cancel(self._dashboard_clock_job)
-            self._dashboard_clock_job = None
-
-    def _atualizar_relogio_dashboard(self):
-        if self._pagina_atual != "dashboard" or not hasattr(self, "_dashboard_clock"):
-            self._cancelar_relogio_dashboard()
-            return
-
-        self._dashboard_clock.configure(
-            text=projeto_ginasio.Camara.datetime.now().strftime("%H:%M:%S")
-        )
-        self._agendar_relogio_dashboard()
-
-    def _parar_animacoes_dashboard(self):
-        for card in self.cards.values():
-            card.stop_animation()
-        for painel in self._chart_panels:
-            painel.stop_animation()
-
-    def _agendar_sino(self):
-        self._cancelar_sino()
-        self._sino_job = self.after(self._sino_refresh_ms, self._auto_atualizar_sino)
-
-    def _cancelar_sino(self):
-        if self._sino_job:
-            self.after_cancel(self._sino_job)
-            self._sino_job = None
-
-    def _auto_atualizar_sino(self):
-        self._atualizar_sino()
-        self._agendar_sino()
-
-    def _atualizar_sino(self):
-        notificacoes.verificar()
-        self.sino.definir(notificacoes.por_ler())
-
-    def _abrir_notificacoes(self):
-        self._atualizar_sino()
-        NotificacoesDialog(self, ao_fechar=self._atualizar_sino)
-
-    def _abrir_relatorio(self):
-        RelatorioDialog(self, self._gerar_relatorio)
-
-    def _gerar_relatorio(self, ano, mes):
-        try:
-            dados = relatorios.dados_relatorio(ano, mes)
-            caminho = relatorio_pdf.gerar_relatorio(dados)
-            os.startfile(caminho)
-        except Exception as erro:
-            messagebox.showerror(
-                "Erro", f"Não foi possível gerar o relatório:\n{erro}"
-            )
-
-    def _atualizar_estado_face_id(self):
-        if self._pagina_atual != "presencas":
-            self._cancelar_estado_face_id()
-            return
-
-        try:
-            from projeto_ginasio.reconhecimento.reconhecimento import (
-                obter_estado_reconhecimento,
-                obter_novas_presencas,
-            )
-
-            estado = obter_estado_reconhecimento()
-
-            counter = obter_novas_presencas()
-            if not hasattr(self, "_face_id_counter"):
-                self._face_id_counter = 0
-            if counter != self._face_id_counter:
-                self._face_id_counter = counter
-                self._atualizar_presencas()
-
-        except Exception as erro:
-            estado = {
-                "estado": "erro",
-                "titulo": "Erro no Face ID",
-                "detalhe": str(erro),
-            }
-
-        mapa_cores = {
-            "ativo": TEMA["success"],
-            "desconhecido": TEMA["warning"],
-            "a_iniciar": TEMA["accent"],
-            "sem_alunos": TEMA["warning"],
-            "erro": TEMA["danger"],
-            "parado": TEMA["muted"],
-        }
-        cor = mapa_cores.get(estado.get("estado"), TEMA["muted"])
-        titulo = estado.get("titulo", "Face ID")
-        detalhe = estado.get("detalhe", "")
-
-        self.pres_face_estado_badge.configure(text="●", text_color=cor)
-        self.pres_face_estado_titulo.configure(text=titulo, text_color=cor)
-        self.pres_face_estado_detalhe.configure(text=detalhe)
-
-        self._agendar_estado_face_id()
-
-    def _fechar_aplicacao(self):
-        self.reabrir_login = False
-        self._encerrar_recursos()
-        self.destroy()
-
-    def _encerrar_recursos(self):
-        self._cancelar_atualizacao_dashboard()
-        self._cancelar_relogio_dashboard()
-        self._cancelar_estado_face_id()
-        self._cancelar_sino()
-        self._parar_animacoes_dashboard()
-        self.parar_face_id()
-
-    def alternar_tema(self):
-        self.focus_set()
-        alternar_tema()
-        self._reconstruir_ui()
-
-    @staticmethod
-    def _texto_tema():
-        if modo_tema() == "dark":
-            return "☀️  Modo claro"
-        return "🌙  Modo escuro"
-
-    def _reconstruir_ui(self):
-        pagina = self._pagina_atual or "dashboard"
-
-        self._cancelar_atualizacao_dashboard()
-        self._cancelar_relogio_dashboard()
-        self._cancelar_estado_face_id()
-        self._cancelar_arranque_face_id()
-        self._parar_animacoes_dashboard()
-
-        self._pagina_atual = None
-
-        for filho in self.winfo_children():
-            filho.destroy()
-
-        self.configure(fg_color=TEMA["bg"])
-        self._criar_layout()
-        self._configurar_treeview()
-        self._mostrar_pagina(pagina)
-
-    def _criar_layout(self):
-        self._botoes_nav = {}
+DIAS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
+
+# (secção, [(chave, texto, ícone, só administrador)])
+MENU = [
+    ("Geral", [
+        ("dashboard", "Dashboard", "casa", False),
+        ("alunos", "Alunos", "alunos", False),
+        ("pagamentos", "Pagamentos", "cartao", False),
+        ("presencas", "Presenças", "visto", False),
+    ]),
+    ("Registos", [
+        ("arq_presencas", "Arquivo de presenças", "relogio", False),
+        ("excluidos", "Arquivo de alunos", "arquivo", True),
+    ]),
+    ("Sistema", [
+        ("funcionarios", "Funcionários", "funcionarios", True),
+        ("administracao", "Administração", "escudo", True),
+        ("camera", "Câmara", "camara", False),
+    ]),
+]
+
+
+# item do menu lateral
+# ======================================================
+class ItemMenu(ctk.CTkFrame):
+    def __init__(self, master, texto, icone_nome, comando, recolhido=False, perigo=False, altura=44):
+        super().__init__(master, fg_color="transparent", corner_radius=12, height=altura,
+                         border_width=1, border_color=TEMA["sidebar"])
+        self.icone_nome = icone_nome
+        self.comando = comando
+        self.ativo = False
+        self._hover = False
+        self.perigo = perigo
+        self.grid_propagate(False)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = ctk.CTkFrame(
-            self,
-            width=230,
-            corner_radius=0,
-            fg_color=TEMA["sidebar"],
-            border_width=0,
-        )
-        self.sidebar.grid(row=0, column=0, sticky="nsew")
-        self.sidebar.grid_columnconfigure(0, weight=1)
-        self.sidebar.grid_rowconfigure(13, weight=1)
+        self.lbl_icone = ctk.CTkLabel(self, text="", width=24)
+        self.lbl_icone.grid(row=0, column=0, padx=(14 if not recolhido else 0, 10), sticky="w" if not recolhido else "")
+        self.lbl_texto = ctk.CTkLabel(self, text=texto, font=fonte(13, "bold"), anchor="w")
+        if recolhido:
+            self.grid_columnconfigure(0, weight=1)
+            self.lbl_icone.grid_configure(padx=0)
+        else:
+            self.lbl_texto.grid(row=0, column=1, sticky="ew")
+        self.lbl_brilho = ctk.CTkLabel(self, text="", image=brilho(26, altura - 4, TEMA["magenta"], TEMA["surface_alt"]))
 
-        ctk.CTkLabel(
-            self.sidebar,
-            text="🏋️ FitControl",
-            font=ctk.CTkFont(size=20, weight="bold"),
-            text_color=TEMA["text"],
-        ).grid(row=0, column=0, padx=20, pady=(28, 6), sticky="w")
+        for widget in (self, self.lbl_icone, self.lbl_texto, self.lbl_brilho):
+            widget.bind("<Enter>", self._entrar)
+            widget.bind("<Leave>", self._sair)
+            widget.bind("<Button-1>", lambda _e=None: self.comando())
+            widget.configure(cursor="hand2")
+        self._pintar(False)
 
-        ctk.CTkLabel(
-            self.sidebar,
-            text=self.utilizador["nome"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-            text_color=TEMA["text"],
-        ).grid(row=1, column=0, padx=20, sticky="w")
+    def definir_ativo(self, ativo):
+        self.ativo = ativo
+        self._pintar(False)
 
-        ctk.CTkLabel(
-            self.sidebar,
-            text=self.utilizador["tipo"],
-            text_color=TEMA["muted"],
-            font=ctk.CTkFont(size=11),
-        ).grid(row=2, column=0, padx=20, pady=(0, 22), sticky="w")
-       
-        nav_items = [
-            ("dashboard", "📊 Dashboard"),
-            ("alunos", "👥 Alunos"),
-        ]
+    def _entrar(self, _e):
+        if not self.ativo and not self._hover:
+            self._pintar(True)
 
-        if self.admin:
-            nav_items.append(("funcionarios", "👨‍💼 Funcionários"))
-            nav_items.append(("excluidos", "🗂️ Arquivo de Alunos"))
-            nav_items.append(("administracao", "⚙ Administração"))
+    def _sair(self, _e):
+        # ao passar do fundo do item para o ícone/texto o Tk manda um "Leave";
+        # ignora-se para o item não piscar
+        try:
+            x, y = self.winfo_pointerxy()
+            por_baixo = self.winfo_containing(x, y)
+        except (KeyError, tk.TclError):
+            por_baixo = None
+        if por_baixo is not None and str(por_baixo).startswith(str(self)):
+            return
+        self._pintar(False)
 
-        nav_items.extend([
-            ("pagamentos", "💳 Pagamentos"),
-            ("presencas", "✅ Presenças"),
-            ("arq_presencas", "📁 Arquivo de Presenças"),
-            ("camera", "📷 Câmara"),
-        ])
+    def _pintar(self, hover):
+        self._hover = hover
+        if self.ativo:
+            self.configure(fg_color=TEMA["surface_alt"], border_color=TEMA["border"])
+            cor_texto, cor_icone = TEMA["text"], TEMA["text"]
+            self.lbl_brilho.place(relx=1.0, rely=0.5, x=-1, anchor="e")
+        else:
+            self.configure(fg_color=TEMA["surface_alt"] if hover else "transparent",
+                           border_color=TEMA["surface_alt"] if hover else TEMA["sidebar"])
+            cor_texto = TEMA["text"] if hover else TEMA["muted"]
+            if self.perigo and hover:
+                cor_texto = TEMA["danger"]
+            cor_icone = cor_texto
+            self.lbl_brilho.place_forget()
+        self.lbl_texto.configure(text_color=cor_texto)
+        self.lbl_icone.configure(image=icone(self.icone_nome, cor_icone, 18))
 
-        for i, (chave, texto) in enumerate(nav_items, start=3):
-            btn = ctk.CTkButton(
-                self.sidebar,
-                text=texto,
-                anchor="w",
-                height=38,
-                corner_radius=TEMA["radius_sm"],
-                fg_color="transparent",
-                text_color=TEMA["muted"],
-                hover_color=TEMA["sidebar_hover"],
-                command=lambda c=chave: self._mostrar_pagina(c),
-            )
-            btn.grid(row=i, column=0, padx=12, pady=3, sticky="ew")
-            self._botoes_nav[chave] = btn
 
-        ctk.CTkButton(
-            self.sidebar,
-            text="🚪 Logout",
-            anchor="w",
-            height=38,
-            corner_radius=TEMA["radius_sm"],
-            fg_color="transparent",
-            text_color=TEMA["muted"],
-            hover_color=TEMA["sidebar_hover"],
-            command=self.logout,
-        ).grid(row=14, column=0, padx=12, pady=(10, 5), sticky="sew")
+# janela
+# ======================================================
+class AcademiaApp(ctk.CTk):
 
-        ctk.CTkLabel(
-            self.sidebar,
-            text="Sistema de Gestão v4.0",
-            text_color=TEMA["muted"],
-            font=ctk.CTkFont(size=10),
-        ).grid(row=15, column=0, padx=20, pady=(0, 15), sticky="sw")
+    def __init__(self, utilizador):
+        super().__init__()
+        self.utilizador = utilizador
+        self.admin = utilizador["tipo"] == "Administrador"
+        self.reabrir_login = False
 
-        self.content = ctk.CTkFrame(self, corner_radius=0, fg_color=TEMA["bg"])
-        self.content.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.content.grid_columnconfigure(0, weight=1)
-        self.content.grid_rowconfigure(0, weight=1)
+        ctk.set_appearance_mode(modo_tema())
+        self.title("FitControl — Gestão de Academia")
+        centralizar(self, 1400, 880, margem=60)
+        self.minsize(1040, 640)
+        preparar_janela(self)
 
-        self.paginas = {
-            "dashboard": self._criar_dashboard(),
-            "alunos": self._criar_alunos(),
-            "pagamentos": self._criar_pagamentos(),
-            "presencas": self._criar_presencas(),
-            "arq_presencas": self._criar_arq_presencas(),
-            "funcionarios": self._criar_funcionarios(),
-            "camera": self._criar_camera(),
-            "administracao": self._criar_administracao(),
-        }
+        inicializar()
 
-        if self.admin:
-            self.paginas["excluidos"] = self._criar_excluidos()
+        self.paginas = {}
+        self._pagina_atual = None
+        self._itens_menu = {}
+        self._relogio_job = None
+        self._sino_job = None
+        self._recolhido = bool(ler_preferencia("menu_recolhido", False))
+        self._a_mudar_tema = False
+        self._face_job = None
+        self._job_aquecimento = None
+        self.protocol("WM_DELETE_WINDOW", self._fechar_aplicacao)
 
-    def logout(self):
-        confirmar = messagebox.askyesno(
-            "Logout",
-            "Tem a certeza de que pretende terminar sessão?"
-        )
+        self._construir()
+        self.mostrar_pagina("dashboard")
+        self._atualizar_sino()
 
-        if not confirmar:
+        # cria as restantes páginas em ocioso: a primeira visita fica
+        # instantânea em vez de travar a construir widgets
+        self._aquecer_paginas()
+
+        # o Face ID demora a carregar: vai-se adiantando em segundo plano
+        self._face_job = self.after(3000, face_id.carregar_em_fundo)
+
+    # construção
+    # ======================================================
+    def _construir(self):
+        estilo_tabela()
+        self.configure(fg_color=TEMA["sidebar"])
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
+        self._itens_menu = {}
+
+        self._criar_menu()
+
+        # painel com o degradê; as páginas e o topo mostram-no por trás
+        painel = PainelFundo(self, TEMA["sidebar"])
+        painel.grid(row=0, column=1, sticky="nsew", padx=(0, 12), pady=12)
+        self.fundo = painel.fundo
+        self.conteudo = painel
+
+        self._criar_topo(painel)
+
+        self._agendar_relogio()
+
+    def _criar_menu(self):
+        largura = 84 if self._recolhido else 252
+        menu = ctk.CTkFrame(self, fg_color=TEMA["sidebar"], corner_radius=0, width=largura)
+        menu.grid(row=0, column=0, sticky="nsw")
+        menu.grid_propagate(False)
+        menu.grid_columnconfigure(0, weight=1)
+        self.menu = menu
+        px = 14 if self._recolhido else 18
+        # em ecrãs baixos (portáteis) o menu fica mais compacto para caber tudo
+        compacto = self.winfo_screenheight() < 900
+        altura_item = 38 if compacto else 44
+
+        # logótipo + recolher
+        topo = ctk.CTkFrame(menu, fg_color="transparent")
+        topo.grid(row=0, column=0, sticky="ew", padx=px, pady=(18, 12) if compacto else (22, 18))
+        ctk.CTkLabel(topo, text="", image=logo_ctk(30, TEMA["accent"], TEMA["violet"])).pack(side="left")
+        if not self._recolhido:
+            rotulo(topo, "FitControl", 18, "bold").pack(side="left", padx=10)
+        ctk.CTkButton(topo, text="", width=30, height=30, corner_radius=8, fg_color="transparent",
+                      hover_color=TEMA["surface_alt"],
+                      image=icone("menu_dir" if self._recolhido else "menu_esq", TEMA["muted"], 18),
+                      command=self._recolher).pack(side="right" if not self._recolhido else "left",
+                                                   padx=(0, 0) if not self._recolhido else (6, 0))
+
+        # utilizador
+        cartao = ctk.CTkFrame(menu, fg_color=TEMA["surface_alt"], corner_radius=14, border_width=1,
+                              border_color=TEMA["border"])
+        cartao.grid(row=1, column=0, sticky="ew", padx=px, pady=(0, 8 if compacto else 18))
+        ctk.CTkLabel(cartao, text=iniciais(self.utilizador["nome"]), width=36, height=36, corner_radius=10,
+                     fg_color=TEMA["accent_suave"], text_color=TEMA["accent"],
+                     font=fonte(13, "bold")).pack(side="left", padx=8 if self._recolhido else (10, 10),
+                                                  pady=6 if compacto else 10)
+        if not self._recolhido:
+            textos = ctk.CTkFrame(cartao, fg_color="transparent")
+            textos.pack(side="left", fill="x", expand=True, pady=8)
+            nome = self.utilizador["nome"]
+            rotulo(textos, nome if len(nome) <= 20 else nome[:19] + "…", 13, "bold", anchor="w").pack(anchor="w")
+            if e_admin_temporario(self.utilizador):
+                rotulo(textos, "Conta temporária", 11, cor=TEMA["warning"], anchor="w").pack(anchor="w")
+            else:
+                rotulo(textos, "Administrador" if self.admin else "Funcionário", 11,
+                       cor=TEMA["muted"], anchor="w").pack(anchor="w")
+
+        linha = 2
+        for seccao, itens in MENU:
+            visiveis = [i for i in itens if self.admin or not i[3]]
+            if not visiveis:
+                continue
+            if not self._recolhido:
+                rotulo(menu, seccao.upper(), 10, "bold", cor=TEMA["subtle"], anchor="w",
+                       height=18 if compacto else 28).grid(
+                    row=linha, column=0, sticky="w", padx=px + 6, pady=(6, 2) if compacto else (10, 4))
+            else:
+                ctk.CTkFrame(menu, height=1, fg_color=TEMA["border"]).grid(
+                    row=linha, column=0, sticky="ew", padx=22, pady=10)
+            linha += 1
+            for chave, texto, nome_icone, _admin in visiveis:
+                item = ItemMenu(menu, texto, nome_icone, lambda c=chave: self.mostrar_pagina(c),
+                                self._recolhido, altura=altura_item)
+                item.grid(row=linha, column=0, sticky="ew", padx=px, pady=1 if compacto else 2)
+                self._itens_menu[chave] = item
+                linha += 1
+
+        menu.grid_rowconfigure(linha, weight=1)
+        sair = ItemMenu(menu, "Terminar sessão", "sair", self.logout, self._recolhido, perigo=True,
+                        altura=altura_item)
+        sair.grid(row=linha + 1, column=0, sticky="ew", padx=px, pady=(0, 4))
+        rotulo(menu, f"v{VERSAO}" if self._recolhido else f"FitControl v{VERSAO}", 10,
+               cor=TEMA["subtle"]).grid(row=linha + 2, column=0, pady=(0, 10 if compacto else 16))
+
+    def _criar_topo(self, painel):
+        topo = Transparente(painel, self.fundo, height=70)
+        topo.place(x=26, y=20, relwidth=1, width=-52)
+        self.topo = topo
+        topo.create_text(0, 4, anchor="nw", text="", fill=TEMA["text"], font=("Segoe UI", 21, "bold"), tags="titulo")
+        topo.create_text(0, 42, anchor="nw", text="", fill=TEMA["muted"], font=("Segoe UI", 10), tags="subtitulo")
+        topo.create_text(0, 35, anchor="e", text="", fill=TEMA["muted"], font=("Segoe UI", 10, "bold"), tags="relogio")
+        topo.bind("<Configure>", self._posicionar_topo, add="+")
+
+        self.alternador = AlternadorTema(topo, self.alternar_tema, escuro())
+        self.alternador.place(relx=1.0, x=-60, y=35, anchor="e")
+
+        self.btn_sino = ctk.CTkButton(topo, text="", image=icone("sino", TEMA["text"], 18), width=42, height=42,
+                                      corner_radius=21, fg_color=TEMA["surface_alt"], hover_color=TEMA["surface_hover"],
+                                      border_width=1, border_color=TEMA["border"], command=self._abrir_notificacoes)
+        self.btn_sino.place(relx=1.0, x=-2, y=35, anchor="e")
+        self.lbl_badge = ctk.CTkLabel(topo, text="", width=18, height=18, corner_radius=9,
+                                      fg_color=TEMA["magenta"], text_color="#ffffff", font=fonte(10, "bold"))
+
+    def _posicionar_topo(self, _e=None):
+        # o relógio fica à esquerda do botão do tema
+        largura = self.topo.winfo_width()
+        x = largura - 60 - self.alternador.winfo_reqwidth() - 16
+        self.topo.coords("relogio", x, 35)
+
+    def _titulo(self, titulo, subtitulo):
+        self.topo.itemconfigure("titulo", text=titulo)
+        self.topo.itemconfigure("subtitulo", text=subtitulo)
+
+    # páginas
+    # ======================================================
+    def mostrar_pagina(self, nome):
+        classe = paginas.PAGINAS.get(nome)
+        if classe is None or (classe.so_admin and not self.admin):
+            return
+        if nome == self._pagina_atual:
             return
 
-        self.reabrir_login = True
-        self._encerrar_recursos()
-        self.destroy()
-
-    def _configurar_treeview(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(
-            "Academia.Treeview",
-            background=TEMA["table_bg"],
-            foreground=TEMA["text"],
-            fieldbackground=TEMA["table_bg"],
-            rowheight=32,
-            font=("Segoe UI", 10),
-            borderwidth=0,
-        )
-        style.configure(
-            "Academia.Treeview.Heading",
-            background=TEMA["table_head"],
-            foreground=TEMA["muted"],
-            font=("Segoe UI", 10, "bold"),
-            borderwidth=0,
-            relief="flat",
-        )
-        style.map(
-            "Academia.Treeview",
-            background=[("selected", TEMA["table_select"])],
-            foreground=[("selected", "white")],
-        )
-        style.map(
-            "Academia.Treeview.Heading",
-            background=[("active", TEMA["surface_alt"])],
-        )
-
-    def _mostrar_pagina(self, nome):
-        pagina_anterior = self._pagina_atual
-        frame_anterior = self.paginas.get(pagina_anterior) if pagina_anterior else None
+        fechar_listas()
+        anterior = self.paginas.get(self._pagina_atual)
+        if anterior is not None:
+            try:
+                anterior.ao_esconder()
+            except Exception as erro:
+                print(f"Erro ao sair da página: {erro}")
+            anterior.place_forget()
 
         try:
-            if pagina_anterior == "dashboard" and nome != "dashboard":
-                self._cancelar_relogio_dashboard()
-                self._parar_animacoes_dashboard()
-
-            if pagina_anterior == "presencas" and nome != "presencas":
-                self._cancelar_estado_face_id()
-                self.parar_face_id()
-
-            if self._pagina_atual:
-                self.paginas[self._pagina_atual].grid_forget()
-
-            for chave, btn in self._botoes_nav.items():
-                if chave == nome:
-                    btn.configure(
-                        fg_color=TEMA["sidebar_active"],
-                        text_color=TEMA["sidebar_active_text"],
-                    )
-                else:
-                    btn.configure(fg_color="transparent", text_color=TEMA["muted"])
-
-            if nome == "excluidos" and not self.admin:
-                return
-
+            if nome not in self.paginas:
+                self.paginas[nome] = classe(self)
             pagina = self.paginas[nome]
-            pagina.grid(row=0, column=0, sticky="nsew")
+            pagina.place(x=26, y=98, relwidth=1, width=-52, relheight=1, height=-120)
             self._pagina_atual = nome
-
-            if nome == "dashboard":
-                self._atualizar_dashboard()
-                self._agendar_atualizacao_dashboard()
-                self._atualizar_relogio_dashboard()
-            else:
-                self._cancelar_atualizacao_dashboard()
-                self._cancelar_relogio_dashboard()
-
-            if nome == "alunos":
-                self._atualizar_lista_alunos()
-            elif nome == "excluidos":
-                self._atualizar_lista_excluidos()
-            elif nome == "pagamentos":
-                self._atualizar_pagamentos()
-            elif nome == "presencas":
-                self._atualizar_presencas()
-                try:
-                    from projeto_ginasio.reconhecimento.reconhecimento import (
-                        reconhecimento_ativo,
-                        _atualizar_estado,
-                    )
-                    if not reconhecimento_ativo():
-                        _atualizar_estado(
-                            "parado",
-                            "Face ID inativo",
-                            "Clique no botão 'Iniciar Face ID' para começar o reconhecimento facial.\n"
-                            "Pressione Q na janela do Face ID para fechar o módulo.",
-                        )
-                except Exception:
-                    pass
-                self._agendar_estado_face_id()
-            elif nome == "camera":
-                self._detetar_cameras()
-            elif nome == "funcionarios":
-                self._atualizar_funcionarios()
-            elif nome == "arq_presencas":
-                self._atualizar_arq_presencas()
-            elif nome == "administracao":
-                self._carregar_logs_administracao()
+            self._titulo(pagina.titulo, pagina.subtitulo)
+            for chave, item in self._itens_menu.items():
+                item.definir_ativo(chave == nome)
+            pagina.ao_mostrar()
         except Exception as erro:
-            self._cancelar_atualizacao_dashboard()
-            self._cancelar_relogio_dashboard()
-            self._cancelar_estado_face_id()
-            for chave, btn in self._botoes_nav.items():
-                if chave == pagina_anterior:
-                    btn.configure(
-                        fg_color=TEMA["sidebar_active"],
-                        text_color=TEMA["sidebar_active_text"],
-                    )
-                else:
-                    btn.configure(fg_color="transparent", text_color=TEMA["muted"])
-            if frame_anterior is not None:
-                frame_anterior.grid(row=0, column=0, sticky="nsew")
-                self._pagina_atual = pagina_anterior
-            messagebox.showerror("Erro", f"Não foi possível abrir o módulo: {erro}")
-
-    def _criar_dashboard(self):
-        frame = ctk.CTkFrame(self.content, fg_color=TEMA["bg"])
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(2, weight=1)
-
-        header = ctk.CTkFrame(frame, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-        header.grid_columnconfigure(0, weight=1)
-
-        titulo = ctk.CTkFrame(header, fg_color="transparent")
-        titulo.grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            titulo,
-            text="Dashboard",
-            font=ctk.CTkFont(size=26, weight="bold"),
-            text_color=TEMA["text"],
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            titulo,
-            text="Visão geral em tempo real da academia",
-            font=ctk.CTkFont(size=12),
-            text_color=TEMA["muted"],
-        ).pack(anchor="w", pady=(2, 0))
-
-        acoes = ctk.CTkFrame(header, fg_color="transparent")
-        acoes.grid(row=0, column=1, sticky="e")
-        self._dashboard_clock = ctk.CTkLabel(
-            acoes,
-            text=projeto_ginasio.Camara.datetime.now().strftime("%H:%M:%S"),
-            font=ctk.CTkFont(family="Consolas", size=24, weight="bold"),
-            text_color=TEMA["accent"],
-        )
-        self._dashboard_clock.pack(side="left", padx=(0, 6))
-
-        btn_secondary(
-            acoes,
-            text="↻",
-            width=34,
-            height=30,
-            font=ctk.CTkFont(size=17),
-            command=self._atualizar_dashboard,
-        ).pack(side="left", padx=(6, 0))
-
-        self.btn_tema = btn_secondary(
-            acoes,
-            text=self._texto_tema(),
-            width=150,
-            height=30,
-            font=ctk.CTkFont(size=12),
-            command=self.alternar_tema,
-        )
-        self.btn_tema.pack(side="left", padx=(6, 0))
-
-        self.sino.botao(acoes, height=30, width=66).pack(side="right", padx=(8, 0))
-
-        metrics = ctk.CTkFrame(frame, fg_color="transparent")
-        metrics.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        for col in range(4):
-            metrics.grid_columnconfigure(col, weight=1)
-
-        if self.admin:
-            card_defs = [
-                ("total_alunos", "👥", "Total de alunos", TEMA["accent"]),
-                ("funcionarios_registados", "👨‍💼", "Funcionários", TEMA["cyan"]),
-                ("receita_total", "💰", "Receita total", TEMA["success"]),
-                ("receita_mes", "📈", "Receita do mês", TEMA["violet"]),
-                ("mensalidades_validas", "✓", "Mensalidades pagas", TEMA["success"]),
-                ("mensalidades_atrasadas", "!", "Mensalidades em atraso", TEMA["danger"]),
-                ("presencas_hoje", "📅", "Presenças hoje", TEMA["warning"]),
-            ]
-        else:
-            card_defs = [
-                ("total_alunos", "👥", "Total de alunos", TEMA["accent"]),
-                ("mensalidades_validas", "✓", "Mensalidades pagas", TEMA["success"]),
-                ("mensalidades_atrasadas", "!", "Mensalidades em atraso", TEMA["danger"]),
-                ("presencas_hoje", "📅", "Presenças hoje", TEMA["warning"]),
-            ]
-
-        self.cards = {}
-        for i, (chave, icon, titulo, cor) in enumerate(card_defs):
-            linha = 0 if i < 4 else 1
-            coluna = i if i < 4 else i - 4
-            card = MetricCard(metrics, icon, titulo, cor)
-            card.grid(row=linha, column=coluna, padx=6, pady=6, sticky="nsew")
-            self.cards[chave] = card
-
-        charts = ctk.CTkFrame(frame, fg_color="transparent")
-        charts.grid(row=2, column=0, sticky="nsew")
-        charts.grid_columnconfigure((0, 1), weight=1)
-        charts.grid_rowconfigure((0, 1), weight=1)
-
-        titulos = [
-            "Alunos por plano",
-            "Presenças — últimos 30 dias",
-            "Pagamentos OK vs em atraso",
-            "Receita mensal",
-        ]
-        self._chart_panels = []
-        for i, titulo_grafico in enumerate(titulos):
-            painel = ChartPanel(charts, titulo_grafico)
-            painel.grid(row=i // 2, column=i % 2, padx=6, pady=6, sticky="nsew")
-            self._chart_panels.append(painel)
-
-        return frame
-
-    def _agendar_atualizacao_dashboard(self):
-        self._cancelar_atualizacao_dashboard()
-        self._dashboard_job = self.after(
-            self._dashboard_refresh_ms, self._auto_atualizar_dashboard
-        )
-
-    def _cancelar_atualizacao_dashboard(self):
-        if self._dashboard_job:
-            self.after_cancel(self._dashboard_job)
-            self._dashboard_job = None
-
-    def _auto_atualizar_dashboard(self):
-        if self._pagina_atual == "dashboard":
-            self._atualizar_dashboard()
-        self._agendar_atualizacao_dashboard()
-
-    def _atualizar_dashboard(self):
-        stats = estatistica.estatisticas()
-        moeda = {
-            "receita_total", "receita_mes",
-        }
-        for chave, card in self.cards.items():
-            card.set_value(
-                stats.get(chave, 0),
-                currency=chave in moeda,
-                animate=True,
-            )
-        self._atualizar_graficos(stats)
-
-    def _atualizar_graficos(self, stats):
-        for painel in self._chart_panels:
-            painel.stop_animation()
-
-        planos = ["Diário", "Mensal", "Trimestral", "Anual"]
-        valores_planos = [
-            stats.get("plano_diario", 0),
-            stats.get("plano_mensal", 0),
-            stats.get("plano_trimestral", 0),
-            stats.get("plano_anual", 0),
-        ]
-        labels_pres, valores_pres = DashboardData.presencas_30_dias()
-        labels_rec, valores_rec = DashboardData.receita_mensal()
-
-        DashboardCharts.barras_planos(self._chart_panels[0], planos, valores_planos)
-        DashboardCharts.linha_presencas(self._chart_panels[1], labels_pres, valores_pres)
-        DashboardCharts.donut_pagamentos(
-            self._chart_panels[2],
-            stats.get("mensalidades_validas", 0),
-            stats.get("mensalidades_atrasadas", 0),
-        )
-        DashboardCharts.receita_mensal(self._chart_panels[3], labels_rec, valores_rec)
-
-    def _criar_alunos(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=3)
-        frame.grid_columnconfigure(1, weight=1)
-        frame.grid_rowconfigure(1, weight=1)
-
-        header = PageHeader(frame, "Gestão de Alunos", "Registar, editar e consultar alunos", sino=self.sino)
-        header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 12))
-
-        btn_primary(header.actions, text="+ Novo Aluno", command=self._novo_aluno).pack(
-            side="left", padx=4
-        )
-        btn_secondary(header.actions, text="Editar", command=self._editar_aluno).pack(
-            side="left", padx=4
-        )
-        if self.admin:
-            btn_danger(header.actions, text="Eliminar", command=self._eliminar_aluno).pack(
-                side="left", padx=4
-            )
-        btn_secondary(header.actions, text="Atualizar", command=self._atualizar_lista_alunos).pack(
-            side="left", padx=4
-        )
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=1, column=0, sticky="nsew")
-        table_frame.grid_rowconfigure(1, weight=1)
-
-        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
-        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(10, 0))
-        busca_frame.grid_columnconfigure(0, weight=0)
-        busca_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            busca_frame,
-            text="🔍",
-            font=ctk.CTkFont(size=14),
-            text_color=TEMA["muted"],
-        ).grid(row=0, column=0, sticky="w", padx=(6, 6))
-        self.alunos_pesquisa = styled_entry(
-            busca_frame, placeholder_text="Pesquisar aluno por nome..."
-        )
-        self.alunos_pesquisa.grid(row=0, column=1, sticky="ew")
-        self.alunos_pesquisa.bind("<KeyRelease>", lambda _e: self._atualizar_lista_alunos())
-
-        cols = ("id", "nome", "telemovel", "documento", "plano", "mensalidade")
-        self.tree_alunos = ttk.Treeview(
-            table_frame, columns=cols, show="headings", style="Academia.Treeview"
-        )
-        headings = {
-            "id": "ID",
-            "nome": "Nome",
-            "telemovel": "Telemóvel",
-            "documento": "Documento",
-            "plano": "Plano",
-            "mensalidade": "Mensalidade",
-        }
-        widths = {
-            "id": 50,
-            "nome": 200,
-            "telemovel": 120,
-            "documento": 130,
-            "plano": 100,
-            "mensalidade": 110,
-        }
-        for col in cols:
-            self.tree_alunos.heading(col, text=headings[col])
-            self.tree_alunos.column(
-                col, width=widths[col], anchor="center" if col == "id" else "w"
-            )
-
-        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_alunos.yview)
-        self.tree_alunos.configure(yscrollcommand=scroll.set)
-        self.tree_alunos.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=12)
-        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
-        self.tree_alunos.bind("<<TreeviewSelect>>", self._ao_selecionar_aluno)
-
-        sidebar = SurfaceCard(frame)
-        sidebar.grid(row=1, column=1, sticky="nsew", padx=(12, 0))
-        sidebar.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            sidebar,
-            text="Aluno selecionado",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=TEMA["text"],
-        ).grid(row=0, column=0, sticky="w", padx=16, pady=(16, 2))
-        ctk.CTkLabel(
-            sidebar,
-            text="Veja os dados principais e a fotografia do registo ativo.",
-            font=ctk.CTkFont(size=11),
-            text_color=TEMA["muted"],
-        ).grid(row=1, column=0, sticky="w", padx=16, pady=(0, 12))
-
-        self.aluno_foto_label = ctk.CTkLabel(
-            sidebar,
-            text="Sem foto",
-            width=180,
-            height=180,
-            corner_radius=14,
-            fg_color=TEMA["surface_alt"],
-            text_color=TEMA["muted"],
-            font=ctk.CTkFont(size=14, weight="bold"),
-        )
-        self.aluno_foto_label.grid(row=2, column=0, padx=16, pady=(0, 14))
-
-        # Mantém vivas as CTkImage (PhotoImage interno) das fotos exibidas,
-        # evitando o erro "pyimage ... does not exist" ao trocar de página.
-        self._aluno_ctk_image = None
-        self._aluno_imgs = []
-
-        self._aluno_info_widgets = {}
-        campos = [
-            ("nome", "Nome"),
-            ("id", "ID"),
-            ("telemovel", "Telemóvel"),
-            ("documento", "Documento"),
-            ("plano", "Plano"),
-            ("mensalidade", "Mensalidade"),
-        ]
-
-        for indice, (chave, rotulo) in enumerate(campos, start=3):
-            bloco = ctk.CTkFrame(sidebar, fg_color="transparent")
-            bloco.grid(row=indice, column=0, sticky="ew", padx=16, pady=(0, 10))
-            bloco.grid_columnconfigure(0, weight=1)
-
-            ctk.CTkLabel(
-                bloco,
-                text=rotulo,
-                font=ctk.CTkFont(size=11),
-                text_color=TEMA["muted"],
-            ).grid(row=0, column=0, sticky="w")
-
-            valor = ctk.CTkLabel(
-                bloco,
-                text="—",
-                font=ctk.CTkFont(size=13, weight="bold"),
-                text_color=TEMA["text"],
-                anchor="w",
-                justify="left",
-            )
-            valor.grid(row=1, column=0, sticky="w", pady=(2, 0))
-            self._aluno_info_widgets[chave] = valor
-
-        self._aluno_ctk_image = None
-        self._limpar_detalhes_aluno()
-
-        return frame
-
-    def _criar_funcionarios(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(1, weight=1)
-
-        header = PageHeader(frame, "Gestão de Funcionários", "Utilizadores e permissões do sistema", sino=self.sino)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        btn_primary(header.actions, text="+ Novo Funcionário", command=self._novo_funcionario).pack(
-            side="left", padx=4
-        )
-        btn_secondary(header.actions, text="Editar", command=self._editar_funcionario).pack(
-            side="left", padx=4
-        )
-        btn_danger(header.actions, text="Eliminar", command=self._eliminar_funcionario).pack(
-            side="left", padx=4
-        )
-        btn_secondary(header.actions, text="Atualizar", command=self._atualizar_funcionarios).pack(
-            side="left", padx=4
-        )
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=1, column=0, sticky="nsew")
-
-        cols = (
-            "id",
-            "nome",
-            "usuario",
-            "tipo"
-        )
-
-        self.tree_funcionarios = ttk.Treeview(
-            table_frame,
-            columns=cols,
-            show="headings",
-            style="Academia.Treeview"
-        )
-
-        headings = {
-            "id": "ID",
-            "nome": "Nome",
-            "usuario": "Utilizador",
-            "tipo": "Cargo",
-        }
-
-        widths = {
-            "id": 55,
-            "nome": 320,
-            "usuario": 200,
-            "tipo": 150,
-        }
-
-        for col in cols:
-
-            self.tree_funcionarios.heading(
-                col,
-                text=headings[col]
-            )
-
-            self.tree_funcionarios.column(
-                col,
-                width=widths[col],
-                anchor="center" if col == "id" else "w"
-            )
-
-        scroll = ctk.CTkScrollbar(
-            table_frame,
-            command=self.tree_funcionarios.yview
-        )
-
-        self.tree_funcionarios.configure(
-            yscrollcommand=scroll.set
-        )
-
-        self.tree_funcionarios.grid(
-            row=0,
-            column=0,
-            sticky="nsew",
-            padx=(12, 0),
-            pady=12,
-        )
-
-        scroll.grid(
-            row=0,
-            column=1,
-            sticky="ns",
-            padx=(0, 12),
-            pady=12,
-        )
-
-        return frame
-
-    def _funcionario_selecionado(self):
-
-        selecao = self.tree_funcionarios.selection()
-
-        if not selecao:
-            messagebox.showinfo(
-                "Seleção",
-                "Selecione um funcionário."
-            )
-            return None
-
-        valores = self.tree_funcionarios.item(selecao[0], "values")
-        if not valores:
-            return None
-
-        id_funcionario = int(valores[0])
-
-        for funcionario in gestao_funcionarios.listar_funcionarios():
-
-            if funcionario["id"] == id_funcionario:
-                return funcionario
-
-        return None
-
-    def _novo_funcionario(self):
-
-        def callback(nome, usuario, senha, tipo):
-
-            ok = gestao_funcionarios.criar_funcionario(
-                nome,
-                usuario,
-                senha,
-                tipo
-            )
-
-            if ok:
-
-                messagebox.showinfo(
-                    "Sucesso",
-                    f"Funcionário '{nome}' criado com sucesso."
-                )
-
-                self._atualizar_funcionarios()
-
-            else:
-
-                messagebox.showerror(
-                    "Erro",
-                    "Não foi possível criar o funcionário.\n"
-                    "Verifique se o utilizador já existe."
-                )
-
-        FuncionarioFormDialog(
-            self,
-            callback
-    )
-    def _editar_funcionario(self):
-
-        funcionario = self._funcionario_selecionado()
-
-        if funcionario is None:
-            return
-
-        def callback(nome, usuario, senha, tipo):
-
-            ok = gestao_funcionarios.editar_funcionario(
-                funcionario["id"],
-                nome,
-                usuario,
-                senha,
-                tipo
-            )
-
-            if ok:
-
-                messagebox.showinfo(
-                    "Sucesso",
-                    "Funcionário atualizado com sucesso."
-                )
-
-                self._atualizar_funcionarios()
-
-            else:
-
-                messagebox.showerror(
-                    "Erro",
-                    "Não foi possível atualizar o funcionário."
-                )
-
-        FuncionarioFormDialog(
-            self,
-            callback,
-            funcionario
-        )
-
-    def _eliminar_funcionario(self):
-
-        funcionario = self._funcionario_selecionado()
-
-        if funcionario is None:
-            return
-
-        if funcionario["usuario"] == self.utilizador["usuario"]:
-            messagebox.showwarning(
-                "Aviso",
-                "Não pode eliminar o utilizador com a sessão iniciada."
-            )
-            return
-
-        confirmar = messagebox.askyesno(
-            "Confirmar",
-            f"Eliminar o funcionário '{funcionario['nome']}'?"
-        )
-
-        if not confirmar:
-            return
-
-        if gestao_funcionarios.eliminar_funcionario(funcionario["id"]):
-
-            messagebox.showinfo(
-                "Sucesso",
-                "Funcionário eliminado com sucesso."
-            )
-
-            self._atualizar_funcionarios()
-
-        else:
-
-            messagebox.showerror(
-                "Erro",
-                "Não foi possível eliminar o funcionário."
-            )
-
-    def _atualizar_lista_alunos(self):
-        selecao_atual = self.tree_alunos.selection()
-        aluno_selecionado = None
-        if selecao_atual:
-            valores = self.tree_alunos.item(selecao_atual[0], "values")
-            if valores:
-                aluno_selecionado = str(valores[0])
-
-        termo = ""
-        if hasattr(self, "alunos_pesquisa"):
-            termo = self.alunos_pesquisa.get().strip().lower()
-
-        alunos_filtrados = [
-            a for a in gestao_alunos.listar_alunos()
-            if not termo or termo in a["nome"].lower()
-        ]
-
-        for item in self.tree_alunos.get_children():
-            self.tree_alunos.delete(item)
-
-        item_para_reselecionar = None
-        for indice, aluno in enumerate(alunos_filtrados):
-            estado_mensalidade, _vencimento = pagamentos.situacao_mensalidade(aluno["id"])
-            estado = "✓ Válida" if estado_mensalidade == "paga" else (
-                "✗ Expirada" if estado_mensalidade == "atrasada" else "— Sem pagamento"
-            )
-            iid = f"aluno_{indice}"
-            self.tree_alunos.insert(
-                "",
-                "end",
-                iid=iid,
-                values=(
-                    aluno["id"],
-                    aluno["nome"],
-                    aluno["telemovel"],
-                    aluno["documento"],
-                    aluno["plano"],
-                    estado,
-                ),
-            )
-            if aluno_selecionado is not None and str(aluno["id"]) == aluno_selecionado:
-                item_para_reselecionar = iid
-
-        if item_para_reselecionar and self.tree_alunos.exists(item_para_reselecionar):
-            self.tree_alunos.selection_set(item_para_reselecionar)
-            self.tree_alunos.focus(item_para_reselecionar)
-            self._atualizar_detalhes_aluno(int(aluno_selecionado))
-        else:
-            self._limpar_detalhes_aluno()
-
-    def _atualizar_funcionarios(self):
-
-        # Limpa a tabela
-        for item in self.tree_funcionarios.get_children():
-            self.tree_funcionarios.delete(item)
-
-        # Adiciona todos os funcionários
-        for indice, funcionario in enumerate(gestao_funcionarios.listar_funcionarios()):
-
-            self.tree_funcionarios.insert(
-                "",
-                "end",
-                iid=f"funcionario_{indice}",
-                values=(
-                    funcionario["id"],
-                    funcionario["nome"],
-                    funcionario["usuario"],
-                    funcionario["tipo"],
-                ),
-            )    
-
-    def _aluno_selecionado(self):
-        selecao = self.tree_alunos.selection()
-        if not selecao:
-            messagebox.showinfo("Seleção", "Selecione um aluno na lista.")
-            return None
-        valores = self.tree_alunos.item(selecao[0], "values")
-        if not valores:
-            return None
-        return int(valores[0])
-
-    def _ao_selecionar_aluno(self, _event=None):
-        selecao = self.tree_alunos.selection()
-        if not selecao:
-            self._limpar_detalhes_aluno()
-            return
-        valores = self.tree_alunos.item(selecao[0], "values")
-        if not valores:
-            self._limpar_detalhes_aluno()
-            return
-        self._atualizar_detalhes_aluno(int(valores[0]))
-
-    def _limpar_detalhes_aluno(self):
-        self._aluno_ctk_image = None
-        if hasattr(self, "aluno_foto_label"):
-            # O customtkinter CTkLabel, ao receber image=None, nao limpa o
-            # '-image' do Label tk interno (a sua _update_image nao faz nada
-            # para None). Se nao limparmos aqui explicitamente, esse Label
-            # continua a referenciar uma PhotoImage ja destruida pelo GC e o
-            # proximo configure(text=...) dispara
-            # 'image "pyimage... " does not exist'.
-            if hasattr(self.aluno_foto_label, "_label"):
-                self.aluno_foto_label._label.configure(image="")
-            self.aluno_foto_label.configure(
-                image=None,
-                text="Selecione um aluno",
-            )
-        self._aluno_imgs = []
-        if hasattr(self, "_aluno_info_widgets"):
-            for widget in self._aluno_info_widgets.values():
-                widget.configure(text="—")
-
-    def _atualizar_detalhes_aluno(self, id_aluno):
-        aluno = aluno_por_id(id_aluno)
-        if not aluno:
-            self._limpar_detalhes_aluno()
-            return
-
-        estado_mensalidade, _vencimento = pagamentos.situacao_mensalidade(aluno["id"])
-        mensalidade = "✓ Válida" if estado_mensalidade == "paga" else (
-            "✗ Expirada" if estado_mensalidade == "atrasada" else "— Sem pagamento"
-        )
-        detalhes = {
-            "nome": aluno.get("nome", "—"),
-            "id": str(aluno.get("id", "—")),
-            "telemovel": aluno.get("telemovel", "—"),
-            "documento": aluno.get("documento", "—"),
-            "plano": aluno.get("plano", "—"),
-            "mensalidade": mensalidade,
-        }
-
-        for chave, valor in detalhes.items():
-            self._aluno_info_widgets[chave].configure(text=valor)
-
-        caminho_foto = aluno.get("foto", "")
-        # O customtkinter CTkLabel, ao receber image=None, nao limpa o '-image'
-        # do Label tk interno. Ao trocar de aluno com foto, libertamos primeiro
-        # essa referencia explicitamente para nao deixar uma PhotoImage morta
-        # apontada pelo Label (causa do erro "pyimage... does not exist").
-        if hasattr(self.aluno_foto_label, "_label"):
-            self.aluno_foto_label._label.configure(image="")
-        if caminho_foto and caminho_foto != "sem_foto" and os.path.exists(caminho_foto):
+            import traceback
+            traceback.print_exc()
+            mensagem(self, "Erro", f"Não foi possível abrir esta página.\n\n{erro}", "erro")
+
+    def _recolher(self):
+        self._recolhido = not self._recolhido
+        guardar_preferencia("menu_recolhido", self._recolhido)
+        self.menu.destroy()
+        self._criar_menu()
+        if self._pagina_atual in self._itens_menu:
+            self._itens_menu[self._pagina_atual].definir_ativo(True)
+
+    def _aquecer_paginas(self):
+        """Cria as páginas em tempos mortos (uma de cada vez).
+
+        Sem isto a primeira visita a cada página demorava ~0,4 s a
+        construir os widgets, o que se sentia como lag ao navegar."""
+        if self._job_aquecimento:
             try:
-                imagem = Image.open(caminho_foto).convert("RGB")
-                self.aluno_foto_label.configure(image=None)
-                ctk_img = ctk.CTkImage(
-                    light_image=imagem,
-                    dark_image=imagem,
-                    size=(180, 180),
-                )
-                # Manter a CTkImage (e o PhotoImage interno) viva enquanto a
-                # página existir — evita o garbage collector.
-                self._aluno_imgs.append(ctk_img)
-                self._aluno_ctk_image = ctk_img
-                self.aluno_foto_label.configure(image=ctk_img, text="")
-                return
+                self.after_cancel(self._job_aquecimento)
             except Exception:
                 pass
+            self._job_aquecimento = None
+        pendentes = [nome for nome, classe in paginas.PAGINAS.items()
+                     if nome not in self.paginas and (self.admin or not classe.so_admin)]
+        self._agenda_aquecimento(pendentes)
 
-        self._aluno_ctk_image = None
-        self.aluno_foto_label.configure(image=None, text="Sem foto")
-
-    def _novo_aluno(self):
-        def callback(nome, telemovel, documento, plano, nova_foto=False):
-            messagebox.showinfo(
-                "Foto do aluno",
-                "Vai abrir-se uma janela da câmara (fora desta aplicação).\n\n"
-                "• Centre o rosto do aluno na câmara\n"
-                "• Pressione P para tirar a foto\n"
-                "• Pressione Q para cancelar sem foto",
-            )
-            self.withdraw()
-            try:
-                resultado = gestao_alunos.criar_aluno(nome, telemovel, documento, plano)
-            except Exception as erro:
-                self.deiconify()
-                messagebox.showerror("Erro", str(erro))
-                return
-            self.deiconify()
-            if resultado is True:
-                messagebox.showinfo("Sucesso", f"Aluno '{nome}' registado com sucesso.")
-                self._atualizar_lista_alunos()
-            elif isinstance(resultado, str) and resultado.startswith("Erro"):
-                messagebox.showerror("Erro de Validação", resultado)
-            else:
-                messagebox.showerror(
-                    "Erro",
-                    "Não foi possível registar o aluno.\n"
-                    "Verifique se o documento já existe ou se a foto foi cancelada.",
-                )
-
-        AlunoFormDialog(self, "Novo Aluno", callback)
-
-    def _editar_aluno(self):
-        id_aluno = self._aluno_selecionado()
-        if id_aluno is None:
+    def _agenda_aquecimento(self, pendentes, atraso=400):
+        if not pendentes:
+            self._job_aquecimento = None
             return
-        aluno = aluno_por_id(id_aluno)
-        if not aluno:
-            return
+        nome, resto = pendentes[0], pendentes[1:]
 
-        def callback(nome, telemovel, documento, plano, nova_foto=False):
-            if nova_foto:
-                messagebox.showinfo(
-                    "Foto do aluno",
-                    "Vai abrir-se uma janela da câmara (fora desta aplicação).\n\n"
-                    "• Centre o rosto do aluno na câmara\n"
-                    "• Pressione P para tirar a nova foto\n"
-                    "• Pressione Q para cancelar e manter a foto atual",
-                )
-                self.withdraw()
-            try:
-                resultado = gestao_alunos.editar_aluno(
-                    id_aluno, nome, telemovel, documento, plano, nova_foto=nova_foto
-                )
-            except Exception as erro:
-                if nova_foto:
-                    self.deiconify()
-                messagebox.showerror("Erro", str(erro))
-                return
-            if nova_foto:
-                self.deiconify()
-            if resultado is True:
-                messagebox.showinfo("Sucesso", f"Aluno '{nome}' atualizado.")
-                self._atualizar_lista_alunos()
-            elif isinstance(resultado, str) and resultado.startswith("Erro"):
-                messagebox.showerror("Erro de Validação", resultado)
-            else:
-                messagebox.showerror("Erro", "Não foi possível atualizar o aluno.")
+        def passo():
+            self._job_aquecimento = None
+            if nome not in self.paginas:
+                try:
+                    self.paginas[nome] = paginas.PAGINAS[nome](self)
+                except Exception as erro:
+                    print(f"Erro ao aquecer a página '{nome}': {erro}")
+            self._agenda_aquecimento(resto, atraso)
 
-        AlunoFormDialog(self, "Editar Aluno", callback, aluno=aluno)
+        self._job_aquecimento = self.after(atraso, passo)
 
-    def _eliminar_aluno(self):
-        if not self.admin:
-            messagebox.showerror(
-                "Permissão",
-                "Apenas administradores podem eliminar alunos."
-            )
+    def alternar_tema(self):
+        if self._a_mudar_tema:
             return
-        id_aluno = self._aluno_selecionado()
-        if id_aluno is None:
-            return
-        aluno = aluno_por_id(id_aluno)
-        if not aluno:
-            return
+        self._a_mudar_tema = True
+        pagina = self._pagina_atual or "dashboard"
+        cobertura = congelar(self)
+        self._parar_tudo()
 
-        if not messagebox.askyesno(
-            "Confirmar",
-            f"Mover '{aluno['nome']}' para o arquivo de exclusão?",
-            parent=self,
-        ):
-            return
+        # primeiro destrói-se tudo e só depois se muda o tema: assim o
+        # customtkinter não perde tempo a repintar widgets que vão sair
+        for filho in self.winfo_children():
+            if filho is not cobertura:
+                filho.destroy()
+        # os callbacks dos widgets mortos saem logo das listas globais do
+        # customtkinter, para as trocas de tema não ficarem cada vez mais lentas
+        limpar_rastreadores_ctk()
+        self.paginas = {}
+        self._pagina_atual = None
+        alternar_tema()
 
+        self._construir()
+        self.mostrar_pagina(pagina)
+        self._aquecer_paginas()
+        self._atualizar_sino()
+        aplicar_tema_barra(self)
+        descongelar(self, cobertura)
+        self._face_job = self.after(3000, face_id.carregar_em_fundo)
+        self.after(150, lambda: setattr(self, "_a_mudar_tema", False))
+
+    # relógio e notificações
+    # ======================================================
+    def _agendar_relogio(self):
+        agora = datetime.now()
+        texto = f"{DIAS[agora.weekday()]}, {agora.day} {MESES[agora.month - 1]}  ·  {agora.strftime('%H:%M:%S')}"
+        if self.topo.winfo_exists():
+            self.topo.itemconfigure("relogio", text=texto)
+        self._relogio_job = self.after(1000, self._agendar_relogio)
+
+    def _atualizar_sino(self):
+        if self._sino_job:
+            self.after_cancel(self._sino_job)
         try:
-            sucesso = gestao_alunos.eliminar_aluno(id_aluno)
+            notificacoes.verificar()
+            total = notificacoes.por_ler()
         except Exception as erro:
-            messagebox.showerror(
-                "Erro",
-                f"Não foi possível eliminar o aluno.\n\n{erro}",
-                parent=self,
-            )
-            return
+            print(f"Erro nas notificações: {erro}")
+            total = 0
+        if self.lbl_badge.winfo_exists():
+            if total:
+                self.lbl_badge.configure(text=str(total) if total < 100 else "99+")
+                self.lbl_badge.place(relx=1.0, x=0, y=10, anchor="ne")
+                self.lbl_badge.lift()
+            else:
+                self.lbl_badge.place_forget()
+        self._sino_job = self.after(60000, self._atualizar_sino)
 
-        if sucesso:
-            messagebox.showinfo("Sucesso", "Aluno movido para o arquivo.", parent=self)
-            self._atualizar_lista_alunos()
-        else:
-            messagebox.showerror(
-                "Erro",
-                "Não foi possível eliminar o aluno.",
-                parent=self,
-            )
+    def _abrir_notificacoes(self):
+        notificacoes.verificar()
+        NotificacoesDialog(self, ao_fechar=self._atualizar_sino)
 
-    def _criar_excluidos(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(1, weight=1)
+    # confirmação por palavra-passe (operações irreversíveis)
+    # ======================================================
+    def confirmar_com_senha(self, titulo, texto):
+        from modulos import funcionarios as gestao_funcionarios
+        from interface_grafica.widgets import pedir_senha
 
-        header = PageHeader(frame, "Arquivo de Exclusão", "Alunos removidos — restauração disponível", sino=self.sino)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        btn_primary(header.actions, text="Restaurar", command=self._restaurar_aluno).pack(
-            side="right", padx=4
-        )
-        btn_secondary(header.actions, text="Atualizar", command=self._atualizar_lista_excluidos).pack(
-            side="right", padx=4
-        )
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=1, column=0, sticky="nsew")
-        table_frame.grid_rowconfigure(1, weight=1)
-
-        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
-        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
-        busca_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            busca_frame,
-            text="🔍",
-            font=ctk.CTkFont(size=14),
-            text_color=TEMA["muted"],
-        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.excluidos_pesquisa = styled_entry(
-            busca_frame, placeholder_text="Pesquisar aluno por nome..."
-        )
-        self.excluidos_pesquisa.grid(row=0, column=1, sticky="ew")
-        self.excluidos_pesquisa.bind(
-            "<KeyRelease>", lambda _e: self._atualizar_lista_excluidos()
-        )
-
-        cols = ("id", "nome", "documento", "plano", "data_exclusao")
-        self.tree_excluidos = ttk.Treeview(
-            table_frame, columns=cols, show="headings", style="Academia.Treeview"
-        )
-        headings = {
-            "id": "ID",
-            "nome": "Nome",
-            "documento": "Documento",
-            "plano": "Plano",
-            "data_exclusao": "Data Exclusão",
-        }
-        for col in cols:
-            self.tree_excluidos.heading(col, text=headings[col])
-            self.tree_excluidos.column(
-                col, width=150, anchor="center" if col == "id" else "w"
-            )
-
-        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_excluidos.yview)
-        self.tree_excluidos.configure(yscrollcommand=scroll.set)
-        self.tree_excluidos.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=12)
-        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
-
-        ctk.CTkLabel(
-            frame,
-            text="Alunos no arquivo são eliminados definitivamente após 60 dias.",
-            text_color=TEMA["muted"],
-            font=ctk.CTkFont(size=11),
-        ).grid(row=2, column=0, pady=(8, 0))
-
-        return frame
-
-    def _atualizar_lista_excluidos(self):
-        for item in self.tree_excluidos.get_children():
-            self.tree_excluidos.delete(item)
-
-        termo = ""
-        if hasattr(self, "excluidos_pesquisa"):
-            termo = self.excluidos_pesquisa.get().strip().lower()
-
-        excluidos = [
-            a for a in gestao_alunos.listar_alunos_excluidos()
-            if not termo or termo in a["nome"].lower()
-        ]
-
-        for indice, aluno in enumerate(excluidos):
-            self.tree_excluidos.insert(
-                "",
-                "end",
-                iid=f"excluido_{indice}",
-                values=(
-                    aluno["id"],
-                    aluno["nome"],
-                    aluno["documento"],
-                    aluno["plano"],
-                    aluno.get("data_exclusao", "—"),
-                ),
-            )
-
-    def _restaurar_aluno(self):
-        if not self.admin:
-            messagebox.showerror(
-                "Permissão",
-                "Apenas administradores podem restaurar alunos."
-            )
-            return
-        selecao = self.tree_excluidos.selection()
-        if not selecao:
-            messagebox.showinfo("Seleção", "Selecione um aluno para restaurar.")
-            return
-
-        valores = self.tree_excluidos.item(selecao[0], "values")
-        if not valores:
-            messagebox.showerror("Erro", "Não foi possível identificar o aluno selecionado.")
-            return
-
-        id_aluno = int(valores[0])
-        if gestao_alunos.restaurar_aluno(id_aluno):
-            messagebox.showinfo("Sucesso", "Aluno restaurado com sucesso.")
-            self._atualizar_lista_excluidos()
-        else:
-            messagebox.showerror("Erro", "Não foi possível restaurar o aluno.")
-
-    def _criar_pagamentos(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(2, weight=1)
-        self._pag_alunos = []
-
-        header = PageHeader(frame, "Pagamentos", "Registar mensalidades e consultar histórico", sino=self.sino)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-
-        btn_primary(
-            header.actions,
-            text="📄 Gerar Relatório PDF",
-            command=self._abrir_relatorio,
-        ).pack(side="left", padx=4)
-
-        if self.admin:
-            btn_danger(
-                header.actions,
-                text="🗑 Apagar Pagamento",
-                command=self._apagar_pagamento_selecionado,
-            ).pack(side="right", padx=4)
-
-        form = SurfaceCard(frame)
-        form.grid(row=1, column=0, sticky="ew", pady=(0, 6))
-        form.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(
-            form,
-            text="🔍",
-            font=ctk.CTkFont(size=14),
-            text_color=TEMA["muted"],
-        ).grid(row=0, column=0, padx=(16, 6), pady=(14, 8), sticky="e")
-        self.pag_aluno_pesquisa = styled_entry(
-            form,
-            placeholder_text="Pesquisar aluno pelo nome...",
-        )
-        self.pag_aluno_pesquisa.grid(row=0, column=1, padx=(0, 10), pady=(14, 8), sticky="ew")
-        self.pag_aluno_pesquisa.bind(
-            "<KeyRelease>", lambda _e: self._atualizar_opcoes_aluno()
-        )
-        self.pag_aluno_var = ctk.StringVar()
-        self.pag_aluno_menu = styled_option(
-            form, variable=self.pag_aluno_var, values=["—"], width=250
-        )
-        self.pag_aluno_menu.grid(row=0, column=2, padx=(0, 16), pady=(14, 8), sticky="e")
-
-        ctk.CTkLabel(form, text="Valor (€)", text_color=TEMA["muted"]).grid(
-            row=1, column=0, padx=16, pady=(8, 14), sticky="e"
-        )
-        self.pag_valor_entry = styled_entry(form, width=140, placeholder_text="0.00")
-        self.pag_valor_entry.grid(row=1, column=1, padx=(0, 10), pady=(8, 14), sticky="w")
-
-        btn_primary(form, text="Registar Pagamento", command=self._registar_pagamento).grid(
-            row=1, column=2, padx=(0, 16), pady=(8, 14), sticky="e"
-        )
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=2, column=0, sticky="nsew")
-        table_frame.grid_rowconfigure(1, weight=1)
-
-        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
-        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
-        busca_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            busca_frame,
-            text="🔍",
-            font=ctk.CTkFont(size=14),
-            text_color=TEMA["muted"],
-        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.pag_pesquisa = styled_entry(
-            busca_frame, placeholder_text="Pesquisar por nome do aluno..."
-        )
-        self.pag_pesquisa.grid(row=0, column=1, sticky="ew")
-        self.pag_pesquisa.bind(
-            "<KeyRelease>", lambda _e: self._preencher_tabela_pagamentos()
-        )
-
-        cols = ("aluno", "plano", "valor", "data_pagamento", "data_vencimento", "estado")
-        self.tree_pagamentos = ttk.Treeview(
-            table_frame, columns=cols, show="headings", style="Academia.Treeview"
-        )
-        headings = {
-            "aluno": "Aluno",
-            "plano": "Plano",
-            "valor": "Valor (€)",
-            "data_pagamento": "Data Pagamento",
-            "data_vencimento": "Vencimento",
-            "estado": "Estado",
-        }
-        for col in cols:
-            self.tree_pagamentos.heading(col, text=headings[col])
-            self.tree_pagamentos.column(col, width=140, anchor="w")
-
-        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_pagamentos.yview)
-        self.tree_pagamentos.configure(yscrollcommand=scroll.set)
-        self.tree_pagamentos.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=10)
-        scroll.grid(row=1, column=1, sticky="ns", pady=10, padx=(0, 10))
-        self._pag_tree_map = {}
-
-        return frame
-
-    def _atualizar_lista_alunos_pagamento(self):
-        self._pag_alunos = []
-        for aluno in gestao_alunos.listar_alunos():
-            self._pag_alunos.append({
-                "id": aluno["id"],
-                "nome": aluno["nome"],
-                "texto": f"{aluno['id']} — {aluno['nome']}",
-            })
-        self._atualizar_opcoes_aluno()
-
-    def _atualizar_opcoes_aluno(self):
-        if not hasattr(self, "pag_aluno_menu"):
-            return
-
-        termo = sem_acentos(self.pag_aluno_pesquisa.get().strip())
-        self._pag_map = {}
-        opcoes = []
-
-        for aluno in self._pag_alunos:
-            if termo and termo not in sem_acentos(aluno["nome"]):
-                continue
-            self._pag_map[aluno["texto"]] = aluno["id"]
-            opcoes.append(aluno["texto"])
-
-        if not opcoes:
-            self.pag_aluno_menu.configure(values=["—"])
-            self.pag_aluno_var.set("—")
-            return
-
-        if len(opcoes) == 1:
-            self.pag_aluno_var.set(opcoes[0])
-        elif self.pag_aluno_var.get() in opcoes:
-            pass
-        else:
-            self.pag_aluno_var.set(opcoes[0])
-        self.pag_aluno_menu.configure(values=opcoes)
-
-    def _atualizar_pagamentos(self):
-        self._atualizar_lista_alunos_pagamento()
-        self._preencher_tabela_pagamentos()
-
-    def _preencher_tabela_pagamentos(self):
-        for item in self.tree_pagamentos.get_children():
-            self.tree_pagamentos.delete(item)
-
-        termo = ""
-        if hasattr(self, "pag_pesquisa"):
-            termo = sem_acentos(self.pag_pesquisa.get().strip())
-
-        self._pag_tree_map = {}
-        indice = 0
-        for pag in reversed(pagamentos.pagamentos):
-            nome = nome_aluno(pag["id_aluno"])
-            if termo and termo not in sem_acentos(nome):
-                continue
-            iid = f"pag_{indice}"
-            id_pagamento = pag.get("id")
-            self._pag_tree_map[iid] = id_pagamento
-            self.tree_pagamentos.insert(
-                "",
-                "end",
-                iid=iid,
-                values=(
-                    nome,
-                    pag["plano"],
-                    pag["valor"],
-                    pag["data_pagamento"],
-                    pag["data_vencimento"],
-                    pag["estado"],
-                ),
-            )
-            indice += 1
-
-    def _pedir_senha_admin(self, titulo, mensagem):
-        """Pede a palavra-passe do utilizador atual (que tem de ser
-        administrador) para confirmar uma ação irreversível."""
-        from tkinter import simpledialog
-        senha = simpledialog.askstring(
-            titulo,
-            mensagem,
-            show="*",
-            parent=self,
-        )
+        senha = pedir_senha(self, titulo, texto)
         if senha is None:
             return False
-        if not self.utilizador or senha != self.utilizador.get("senha"):
-            messagebox.showerror("Erro", "Palavra-passe incorreta.")
+
+        guardada = self.utilizador.get("senha")
+        for funcionario in gestao_funcionarios.funcionarios:
+            if funcionario["id"] == self.utilizador["id"]:
+                guardada = funcionario["senha"]
+                break
+
+        if not gestao_funcionarios.senha_correta(guardada, senha):
+            mensagem(self, "Palavra-passe incorreta", "A operação foi cancelada.", "erro")
             return False
         return True
 
-    def _apagar_pagamento_selecionado(self):
-        if not self.admin:
-            return
-        selecoes = self.tree_pagamentos.selection()
-        if not selecoes:
-            messagebox.showinfo(
-                "Pagamento", "Selecione primeiro o pagamento a apagar na lista."
-            )
-            return
-        iid = selecoes[0]
-        id_pagamento = self._pag_tree_map.get(iid)
-        if not id_pagamento:
-            messagebox.showerror("Erro", "Não foi possível identificar o pagamento.")
-            return
+    # tarefas em segundo plano
+    # ======================================================
+    def em_fundo(self, funcao, ao_terminar, ao_erro=None):
+        """Corre funcao() num thread e chama ao_terminar(resultado) no
+        thread da interface, sem congelar a janela."""
+        estado = {}
 
-        valores = self.tree_pagamentos.item(iid, "values")
-        descricao = f"{valores[0]} — {valores[2]} € ({valores[3]})"
-
-        if not self._pedir_senha_admin(
-            "Apagar pagamento",
-            f"Deseja apagar o seguinte pagamento?\n\n{descricao}\n\n"
-            "Introduza a palavra-passe do administrador para confirmar.",
-        ):
-            return
-
-        if pagamentos.eliminar_pagamento(id_pagamento):
-            self._atualizar_pagamentos()
-            messagebox.showinfo("Sucesso", "Pagamento apagado com sucesso.")
-        else:
-            messagebox.showerror("Erro", "Não foi possível apagar o pagamento.")
-
-    def _registar_pagamento(self):
-        selecionado = self.pag_aluno_var.get()
-
-        if selecionado == "—" or selecionado not in self._pag_map:
-            if not self._pag_alunos:
-                messagebox.showwarning("Aviso", "Não existem alunos registados.")
-            else:
-                messagebox.showwarning(
-                    "Aviso",
-                    "Nenhum aluno encontrado. Escolha um aluno na lista ou "
-                    "altere a pesquisa.",
-                )
-            return
-
-        valor_texto = self.pag_valor_entry.get().strip().replace(",", ".")
-        try:
-            valor = float(valor_texto)
-        except ValueError:
-            messagebox.showwarning("Valor inválido", "Introduza um valor numérico válido.")
-            return
-
-        if valor <= 0:
-            messagebox.showwarning("Valor inválido", "O valor deve ser superior a zero.")
-            return
-
-        id_aluno = self._pag_map[selecionado]
-        if pagamentos.registar_pagamento(id_aluno, valor):
-            messagebox.showinfo("Sucesso", "Pagamento registado com sucesso.")
-            self.pag_valor_entry.delete(0, "end")
-            self._atualizar_pagamentos()
-        else:
-            messagebox.showerror("Erro", "Não foi possível registar o pagamento.")
-
-    def _criar_presencas(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(3, weight=1)
-
-        header = PageHeader(frame, "Presenças", "Registar entradas e consultar o histórico diário", sino=self.sino)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        btn_primary(
-            header.actions,
-            text="📁 Arquivo de Presenças",
-            command=lambda: self._mostrar_pagina("arq_presencas"),
-        ).pack(side="right", padx=4)
-
-        form = SurfaceCard(frame)
-        form.grid(row=1, column=0, sticky="ew", pady=(0, 10))
-        form.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(form, text="Aluno", text_color=TEMA["muted"]).grid(
-            row=0, column=0, padx=16, pady=14, sticky="e"
-        )
-        self.pres_aluno_var = ctk.StringVar()
-        self.pres_aluno_menu = styled_option(
-            form, variable=self.pres_aluno_var, values=["—"], width=300
-        )
-        self.pres_aluno_menu.grid(row=0, column=1, padx=10, pady=14, sticky="w")
-
-        btn_primary(
-            form, text="Registar Entrada", command=self._registar_presenca
-        ).grid(row=0, column=2, padx=10, pady=14)
-        btn_secondary(
-            form, text="Atualizar", command=self._atualizar_presencas
-        ).grid(row=0, column=3, padx=(0, 6), pady=14)
-        btn_primary(
-            form, text="🎯 Iniciar Face ID", command=self.iniciar_face_id, fg_color=TEMA["success"]
-        ).grid(row=0, column=4, padx=(0, 6), pady=14)
-        btn_danger(
-            form, text="Parar Face ID", command=self.parar_face_id
-        ).grid(row=0, column=5, padx=(0, 16), pady=14)
-
-        estado_card = SurfaceCard(frame)
-        estado_card.grid(row=2, column=0, sticky="ew", pady=(0, 10))
-        estado_card.grid_columnconfigure(1, weight=1)
-
-        self.pres_face_estado_badge = ctk.CTkLabel(
-            estado_card,
-            text="●",
-            font=ctk.CTkFont(size=22, weight="bold"),
-            text_color=TEMA["muted"],
-            width=24,
-        )
-        self.pres_face_estado_badge.grid(row=0, column=0, rowspan=2, padx=(18, 10), pady=16, sticky="n")
-
-        self.pres_face_estado_titulo = ctk.CTkLabel(
-            estado_card,
-            text="Face ID inativo",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=TEMA["muted"],
-            anchor="w",
-        )
-        self.pres_face_estado_titulo.grid(row=0, column=1, padx=(0, 18), pady=(14, 2), sticky="ew")
-
-        self.pres_face_estado_detalhe = ctk.CTkLabel(
-            estado_card,
-            text="Clique no botão 'Iniciar Face ID' para começar o reconhecimento facial.\n"
-                 "Pressione Q na janela do Face ID para fechar o módulo.",
-            font=ctk.CTkFont(size=12),
-            text_color=TEMA["muted"],
-            justify="left",
-            anchor="w",
-        )
-        self.pres_face_estado_detalhe.grid(row=1, column=1, padx=(0, 18), pady=(0, 14), sticky="ew")
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=3, column=0, sticky="nsew")
-
-        cols = ("aluno", "data", "hora")
-        self.tree_presencas = ttk.Treeview(
-            table_frame, columns=cols, show="headings", style="Academia.Treeview"
-        )
-        headings = {"aluno": "Aluno", "data": "Data", "hora": "Hora"}
-        for col in cols:
-            self.tree_presencas.heading(col, text=headings[col])
-            self.tree_presencas.column(col, width=250, anchor="w")
-
-        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_presencas.yview)
-        self.tree_presencas.configure(yscrollcommand=scroll.set)
-        self.tree_presencas.grid(row=0, column=0, sticky="nsew", padx=(10, 0), pady=10)
-        scroll.grid(row=0, column=1, sticky="ns", pady=10, padx=(0, 10))
-
-        return frame
-
-    def _atualizar_presencas(self):
-        nomes = []
-        self._pres_map = {}
-        for aluno in gestao_alunos.listar_alunos():
-            texto = f"{aluno['id']} — {aluno['nome']}"
-            nomes.append(texto)
-            self._pres_map[texto] = aluno["id"]
-
-        if nomes:
-            self.pres_aluno_menu.configure(values=nomes)
-            self.pres_aluno_var.set(nomes[0])
-        else:
-            self.pres_aluno_menu.configure(values=["—"])
-            self.pres_aluno_var.set("—")
-
-        for item in self.tree_presencas.get_children():
-            self.tree_presencas.delete(item)
-
-        with presencas._presencas_lock:
-            lista_pres = list(reversed(presencas.presencas))
-
-        for pres in lista_pres:
-            self.tree_presencas.insert(
-                "",
-                "end",
-                values=(
-                    nome_aluno(pres["id_aluno"]),
-                    pres["data"],
-                    pres["hora"],
-                ),
-            )
-
-    def _registar_presenca(self):
-        selecionado = self.pres_aluno_var.get()
-        if selecionado == "—" or selecionado not in self._pres_map:
-            messagebox.showwarning("Aviso", "Não existem alunos registados.")
-            return
-
-        id_aluno = self._pres_map[selecionado]
-        if presencas.registar_presenca(id_aluno):
-            messagebox.showinfo("Sucesso", f"Entrada registada para {nome_aluno(id_aluno)}.")
-            self._atualizar_presencas()
-        else:
-            messagebox.showerror("Erro", "Não foi possível registar a presença.")
-
-    def _criar_arq_presencas(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(1, weight=1)
-
-        header = PageHeader(
-            frame,
-            "Arquivo de Presenças",
-            "Histórico permanente de presenças (guardado nos Logs do sistema)",
-            sino=self.sino,
-        )
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        if self.admin:
-            btn_danger(
-                header.actions,
-                text="🗑 Apagar Arquivo",
-                command=self._apagar_arquivo_presencas,
-            ).pack(side="right", padx=4)
-
-        table_frame = TablePanel(frame)
-        table_frame.grid(row=1, column=0, sticky="nsew")
-        table_frame.grid_rowconfigure(1, weight=1)
-
-        busca_frame = ctk.CTkFrame(table_frame, fg_color="transparent")
-        busca_frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 0))
-        busca_frame.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            busca_frame,
-            text="🔍",
-            font=ctk.CTkFont(size=14),
-            text_color=TEMA["muted"],
-        ).grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self.arq_pres_pesquisa = styled_entry(
-            busca_frame, placeholder_text="Pesquisar presença por nome do aluno..."
-        )
-        self.arq_pres_pesquisa.grid(row=0, column=1, sticky="ew")
-        self.arq_pres_pesquisa.bind(
-            "<KeyRelease>", lambda _e: self._atualizar_arq_presencas()
-        )
-
-        cols = ("data", "evento")
-        self.tree_arq_presencas = ttk.Treeview(
-            table_frame, columns=cols, show="headings", style="Academia.Treeview"
-        )
-        headings = {"data": "Data / Hora", "evento": "Presença"}
-        for col in cols:
-            self.tree_arq_presencas.heading(col, text=headings[col])
-            self.tree_arq_presencas.column(
-                "data", width=170, anchor="center"
-            )
-            self.tree_arq_presencas.column("evento", width=500, anchor="w")
-
-        scroll = ctk.CTkScrollbar(table_frame, command=self.tree_arq_presencas.yview)
-        self.tree_arq_presencas.configure(yscrollcommand=scroll.set)
-        self.tree_arq_presencas.grid(
-            row=1, column=0, sticky="nsew", padx=(12, 0), pady=12
-        )
-        scroll.grid(row=1, column=1, sticky="ns", pady=12, padx=(0, 12))
-
-        return frame
-
-    def _atualizar_arq_presencas(self):
-        for item in self.tree_arq_presencas.get_children():
-            self.tree_arq_presencas.delete(item)
-
-        termo = ""
-        if hasattr(self, "arq_pres_pesquisa"):
-            termo = self.arq_pres_pesquisa.get().strip().lower()
-
-        logs = acessos.arquivo_presencas()
-        for log in logs:
-            evento = log["evento"]
-            if termo and termo not in evento.lower():
-                continue
-            self.tree_arq_presencas.insert(
-                "", "end", values=(log["data"], evento)
-            )
-
-    def _apagar_arquivo_presencas(self):
-        if not self.admin:
-            return
-        if not self._pedir_senha_admin(
-            "Apagar arquivo de presenças",
-            "Tem a certeza que deseja apagar TODO o histórico permanente de "
-            "presenças e as presenças do dia atual?\n\n"
-            "Introduza a palavra-passe do administrador para confirmar.",
-        ):
-            return
-        acessos.apagar_arquivo_presencas()
-        self._atualizar_arq_presencas()
-        self._atualizar_presencas()
-        messagebox.showinfo(
-            "Sucesso",
-            "Arquivo de presenças e presenças do dia atual apagados.",
-        )
-
-    def _criar_camera(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-
-        header = PageHeader(frame, "Câmara", "Configure a câmara usada no Face ID e no registo de alunos", sino=self.sino)
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        # --- Configuração da câmara ---
-        config_card = SurfaceCard(frame)
-        config_card.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        config_card.grid_columnconfigure(1, weight=1)
-        config_card.grid_columnconfigure(3, weight=1)
-
-        ctk.CTkLabel(
-            config_card, text="Configuração da Câmara",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEMA["text"],
-        ).grid(row=0, column=0, columnspan=6, padx=20, pady=(18, 12), sticky="w")
-
-        config_atual = projeto_ginasio.Camara.carregar_config_camera()
-        self._cameras_disponiveis = [config_atual["indice"]]
-        indice_atual = config_atual["indice"]
-        largura_atual = config_atual["largura"]
-        altura_atual = config_atual["altura"]
-
-        self._camera_var = ctk.StringVar(value=str(indice_atual))
-
-        ctk.CTkLabel(config_card, text="Câmara:", text_color=TEMA["muted"]).grid(row=1, column=0, padx=(20, 5), pady=(0, 18), sticky="e")
-        self._camera_menu = ctk.CTkOptionMenu(
-            config_card,
-            values=[f"Câmara {i}" for i in self._cameras_disponiveis],
-            command=lambda v: self._camera_var.set(v.replace("Câmara ", "")),
-            fg_color=(TEMA["input_bg"], "#1F6AA5"),
-            button_color=(TEMA["border"], "#144870"),
-            button_hover_color=(TEMA["accent"], "#203A4F"),
-            text_color=(TEMA["on_surface"], "#DCE4EE"),
-        )
-        self._camera_menu.set(f"Câmara {indice_atual}")
-        self._camera_menu.grid(row=1, column=1, padx=(5, 10), pady=(0, 18), sticky="w")
-
-        ctk.CTkLabel(config_card, text="Largura:", text_color=TEMA["muted"]).grid(row=1, column=2, padx=(10, 5), pady=(0, 18), sticky="e")
-        self._largura_var = ctk.StringVar(value=str(largura_atual))
-        self._largura_entry = styled_entry(config_card, width=100, textvariable=self._largura_var)
-        self._largura_entry.grid(row=1, column=3, padx=(5, 10), pady=(0, 18), sticky="w")
-
-        ctk.CTkLabel(config_card, text="Altura:", text_color=TEMA["muted"]).grid(row=1, column=4, padx=(10, 5), pady=(0, 18), sticky="e")
-        self._altura_var = ctk.StringVar(value=str(altura_atual))
-        self._altura_entry = styled_entry(config_card, width=100, textvariable=self._altura_var)
-        self._altura_entry.grid(row=1, column=5, padx=(5, 20), pady=(0, 18), sticky="w")
-
-        btn_config_frame = ctk.CTkFrame(config_card, fg_color="transparent")
-        btn_config_frame.grid(row=2, column=0, columnspan=6, padx=20, pady=(0, 18), sticky="ew")
-        btn_config_frame.grid_columnconfigure(0, weight=1)
-
-        btn_secondary(btn_config_frame, text="Detetar câmaras", command=self._detetar_cameras)\
-            .grid(row=0, column=1, padx=5, sticky="e")
-        btn_primary(btn_config_frame, text="Guardar configuração", command=self._guardar_camera_selecionada)\
-            .grid(row=0, column=2, padx=(5, 0), sticky="e")
-
-        # --- Ações ---
-        acoes_card = SurfaceCard(frame)
-        acoes_card.grid(row=2, column=0, sticky="ew", pady=(0, 12))
-
-        ctk.CTkLabel(
-            acoes_card, text="Ações",
-            font=ctk.CTkFont(size=18, weight="bold"), text_color=TEMA["text"],
-        ).pack(padx=20, pady=(18, 4), anchor="w")
-
-        ctk.CTkLabel(
-            acoes_card,
-            text="A câmara abrirá numa janela separada. Pressione Q para fechar.",
-            justify="left", font=ctk.CTkFont(size=13), text_color=TEMA["muted"],
-        ).pack(padx=20, pady=(0, 14), anchor="w")
-
-        btn_frame = ctk.CTkFrame(acoes_card, fg_color="transparent")
-        btn_frame.pack(padx=20, pady=(0, 18), anchor="w")
-
-        btn_primary(
-            btn_frame, text="Abrir Câmara", width=180, font=ctk.CTkFont(size=14),
-            command=lambda: self._executar_camera(projeto_ginasio.Camara.ligarCam),
-        ).pack(side="left", padx=(0, 10))
-
-        btn_secondary(
-            btn_frame, text="Gravar Vídeo", width=180, font=ctk.CTkFont(size=14),
-            command=lambda: self._executar_camera(projeto_ginasio.Camara.gravarVideo),
-        ).pack(side="left", padx=10)
-
-        return frame
-
-
-    def _detetar_cameras(self):
-        if self._face_id_thread and self._face_id_thread.is_alive():
-            self.parar_face_id()
-
-        def _detetar():
+        def trabalho():
             try:
-                cameras = projeto_ginasio.Camara.listar_cameras() or [0]
+                estado["resultado"] = funcao()
+            except Exception as erro:
+                estado["erro"] = erro
+
+        thread = threading.Thread(target=trabalho, daemon=True)
+        thread.start()
+
+        def verificar():
+            if thread.is_alive():
+                self.after(80, verificar)
+            elif "erro" in estado:
+                if ao_erro:
+                    ao_erro(estado["erro"])
+                else:
+                    mensagem(self, "Erro", str(estado["erro"]), "erro")
+            else:
+                ao_terminar(estado.get("resultado"))
+
+        self.after(80, verificar)
+
+    # sair
+    # ======================================================
+    def destroy(self):
+        cancelar_pendentes(self)
+        super().destroy()
+
+    def _parar_tudo(self):
+        for job in (self._relogio_job, self._sino_job, self._face_job, self._job_aquecimento):
+            if job:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+        self._relogio_job = self._sino_job = self._face_job = self._job_aquecimento = None
+        pagina = self.paginas.get(self._pagina_atual)
+        if pagina is not None:
+            try:
+                pagina.ao_esconder()
             except Exception:
-                cameras = [0]
-            self.after(0, lambda: self._cameras_detetadas(cameras))
+                pass
+        libertar_camera()
 
-        threading.Thread(target=_detetar, daemon=True).start()
-
-    def _cameras_detetadas(self, cameras):
-        self._cameras_disponiveis = cameras
-        self._camera_menu.configure(values=[f"Câmara {i}" for i in cameras])
-        self._camera_menu.set(f"Câmara {cameras[0]}")
-        self._camera_var.set(str(cameras[0]))
-
-
-    def _guardar_camera_selecionada(self):
-        try:
-            indice = int(self._camera_var.get())
-            largura = int(self._largura_var.get())
-            altura = int(self._altura_var.get())
-            
-            if largura < 320 or altura < 240:
-                messagebox.showwarning("Resolução inválida", "A resolução mínima é 320x240.")
-                return
-            
-            if largura > 3840 or altura > 2160:
-                messagebox.showwarning("Resolução inválida", "A resolução máxima é 3840x2160.")
-                return
-            
-            projeto_ginasio.Camara.guardar_config_camera(indice=indice, largura=largura, altura=altura)
-            messagebox.showinfo("Sucesso", "Configuração da câmara guardada com sucesso.")
-        except ValueError:
-            messagebox.showwarning("Valor inválido", "Introduza valores numéricos válidos para a resolução.")
-
-
-    def _executar_camera(self, funcao):
-        indice = int(self._camera_var.get())
-        if self._face_id_thread and self._face_id_thread.is_alive():
-            self.parar_face_id()
-        threading.Thread(target=funcao, kwargs={"indice_camera": indice}, daemon=True).start()
-
-    def _criar_administracao(self):
-        frame = PageFrame(self.content)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(2, weight=1)
-
-        header = PageHeader(
-            frame,
-            "Administração",
-            "Consultar os Logs de administração e acesso do sistema",
-            sino=self.sino,
-        )
-        header.grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        btn_secondary(
-            header.actions,
-            text="🔄 Atualizar",
-            width=130,
-            command=self._atualizar_logs_administracao,
-        ).pack(side="left", padx=4)
-
-        if self.admin:
-            btn_danger(
-                header.actions,
-                text="🗑 Apagar Todos os Logs",
-                width=180,
-                command=self._apagar_logs_administracao,
-            ).pack(side="right", padx=4)
-
-        resumo = SurfaceCard(frame)
-        resumo.grid(row=1, column=0, sticky="ew", pady=(0, 12))
-        resumo.grid_columnconfigure(0, weight=1)
-        resumo.grid_columnconfigure(1, weight=0)
-
-        info = ctk.CTkFrame(resumo, fg_color="transparent")
-        info.grid(row=0, column=0, sticky="w", padx=18, pady=16)
-
-        ctk.CTkLabel(
-            info,
-            text="Logs do sistema",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=TEMA["text"],
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            info,
-            text=(
-                "Registos de administração/acesso (login, logout, permissões e "
-                "apagar históricos) guardados na base de dados SQLite."
-            ),
-            font=ctk.CTkFont(size=12),
-            text_color=TEMA["muted"],
-            justify="left",
-            wraplength=520,
-        ).pack(anchor="w", pady=(4, 0))
-
-        filtro = ctk.CTkFrame(resumo, fg_color="transparent")
-        filtro.grid(row=0, column=1, sticky="e", padx=18, pady=16)
-
-        ctk.CTkLabel(
-            filtro,
-            text="Tipo de registo:",
-            font=ctk.CTkFont(size=12),
-            text_color=TEMA["muted"],
-        ).pack(anchor="w")
-        self.log_filtro_var = ctk.StringVar(value="administracao")
-        self.log_filtro_menu = ctk.CTkOptionMenu(
-            filtro,
-            values=["administracao", "presenca", "pagamento", "aluno",
-                    "funcionario", "geral", "todos"],
-            variable=self.log_filtro_var,
-            command=lambda _v: self._atualizar_logs_administracao(),
-            width=200,
-            fg_color=(TEMA["input_bg"], "#1F6AA5"),
-            button_color=(TEMA["border"], "#144870"),
-            button_hover_color=(TEMA["accent"], "#203A4F"),
-            text_color=(TEMA["on_surface"], "#DCE4EE"),
-        )
-        self.log_filtro_menu.pack(anchor="w", pady=(6, 0))
-
-        painel_historico = SurfaceCard(frame)
-        painel_historico.grid(row=2, column=0, sticky="nsew", padx=(0, 0))
-        painel_historico.grid_columnconfigure(0, weight=1)
-        painel_historico.grid_rowconfigure(1, weight=1)
-
-        topo_historico = ctk.CTkFrame(painel_historico, fg_color="transparent")
-        topo_historico.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 0))
-        topo_historico.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            topo_historico,
-            text="📜 Registos recentes",
-            font=ctk.CTkFont(size=15, weight="bold"),
-            text_color=TEMA["text"],
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            topo_historico,
-            text="Eliminado o Histórico de Acessos separado — tudo passa pelos Logs.",
-            font=ctk.CTkFont(size=11),
-            text_color=TEMA["muted"],
-        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
-
-        self.txt_historico = ctk.CTkTextbox(
-            painel_historico,
-            corner_radius=12,
-            border_width=1,
-            border_color=TEMA["border"],
-            fg_color=TEMA["input_bg"],
-            font=("Consolas", 11),
-        )
-        self.txt_historico.grid(row=1, column=0, sticky="nsew", padx=16, pady=16)
-
-        return frame
-
-    def _atualizar_logs_administracao(self):
-        self.txt_historico.configure(state="normal")
-        self.txt_historico.delete("1.0", "end")
-
-        tipo = self.log_filtro_var.get()
-        if tipo == "todos":
-            logs = acessos.todos_logs()
-        else:
-            logs = acessos.listar_administracao() if tipo == "administracao" \
-                else get_logs_por_tipo(tipo)
-
-        texto = ""
-        for log in logs:
-            texto += (
-                f"📅 {log['data']}\n"
-                f"└── [{log['tipo']}] {log['evento']}\n"
-                f"\n"
-                f"{'─' * 60}\n\n"
-            )
-
-        if not texto:
-            texto = "Sem registos para o tipo selecionado."
-
-        self.txt_historico.insert("1.0", texto)
-        self.txt_historico.configure(state="disabled")
-
-    def _apagar_logs_administracao(self):
-        if not self.admin:
+    def logout(self):
+        if not confirmar(self, "Terminar sessão", "Tem a certeza de que pretende terminar a sessão?",
+                         texto_botao="Terminar sessão"):
             return
-        if not self._pedir_senha_admin(
-            "Apagar logs",
-            "Deseja apagar TODOS os logs do sistema (administração, presenças, "
-            "pagamentos, alunos, funcionários e gerais)?\n\n"
-            "Introduza a palavra-passe do administrador para confirmar.",
-        ):
-            return
-        from projeto_ginasio.db_adapter import limpar_todos_logs
-        limpar_todos_logs()
-        self._atualizar_logs_administracao()
-        messagebox.showinfo("Sucesso", "Todos os logs do sistema apagados.")
+        terminar_sessao()
+        self.reabrir_login = True
+        self._parar_tudo()
+        self.destroy()
 
-    def _carregar_logs_administracao(self):
-        self._atualizar_logs_administracao()
+    def _fechar_aplicacao(self):
+        self.reabrir_login = False
+        terminar_sessao()
+        self._parar_tudo()
+        self.destroy()
 
 
 if __name__ == "__main__":
     from interface_grafica.main import main
 
     main()
-  

@@ -1,116 +1,114 @@
-"""Constantes visuais da interface gráfica."""
-
 import customtkinter as ctk
 
+from interface_grafica.utils import ler_preferencia, guardar_preferencia
+
 PLANOS = ["Diário", "Mensal", "Trimestral", "Anual"]
+VERSAO = "5.0"
 
-_TEMA_ESCURO = {
-    "bg": "#0c0c10",
-    "surface": "#15151c",
-    "surface_alt": "#1c1c26",
-    "border": "#2a2a38",
-    "text": "#f4f4f5",
-    "muted": "#8b8b9a",
-    "accent": "#7c6cff",
-    "accent_hover": "#6b5ce7",
-    "cyan": "#22d3ee",
-    "success": "#34d399",
-    "danger": "#f87171",
-    "danger_hover": "#ef4444",
-    "warning": "#fbbf24",
-    "sidebar": "#101016",
-    "sidebar_hover": "#1a1a24",
-    "sidebar_active": "#7c6cff",
-    "sidebar_active_text": "#a89bff",
-    "table_bg": "#15151c",
-    "table_head": "#1c1c26",
-    "table_row_alt": "#18181f",
-    "table_select": "#7c6cff",
-    "input_bg": "#1c1c26",
-    "radius": 16,
-    "radius_sm": 10,
-    "chart": ["#7c6cff", "#22d3ee", "#a78bfa", "#34d399", "#fb7185", "#fcd34d"],
-    "violet": "#a78bfa",
-    "on_surface": "#DCE4EE",
-    "on_accent": "#DCE4EE",
+
+# cores
+# ======================================================
+_ESCURO = {
+    "bg": "#09090c",
+    "sidebar": "#0e0e12",
+    "surface": "#141419",
+    "surface_alt": "#1c1c23",
+    "surface_hover": "#23232c",
+    "border": "#24242d",
+    "border_forte": "#33333e",
+    "text": "#f3f3f6",
+    "muted": "#8b8b98",
+    "subtle": "#5d5d6b",
+    "accent": "#3ee59a",
+    "accent_hover": "#31cc87",
+    "accent_suave": "#15281f",
+    "on_accent": "#04120b",
+    "magenta": "#ff3d8b",
+    "violet": "#8f7cff",
+    "amber": "#ffb547",
+    "cyan": "#4cc9f0",
+    "danger": "#ff5468",
+    "danger_hover": "#e8455a",
+    "danger_suave": "#2a1418",
+    "warning": "#ffb547",
+    "input_bg": "#101015",
+    "table_alt": "#17171d",
+    "table_select": "#1f3329",
+    "sombra": "#000000",
+    "seg_sel": "#2e2e3a",
 }
 
-_TEMA_CLARO = {
-    "bg": "#f4f4f7",
+_CLARO = {
+    "bg": "#eeeef2",
+    "sidebar": "#f8f8fa",
     "surface": "#ffffff",
-    "surface_alt": "#eeeef4",
-    "border": "#dcdce6",
-    "text": "#16161d",
-    "muted": "#6b6b7b",
-    "accent": "#6558e8",
-    "accent_hover": "#5447d6",
-    "cyan": "#0e7490",
-    "success": "#047857",
-    "danger": "#dc2626",
-    "danger_hover": "#b91c1c",
-    "warning": "#b45309",
-    "sidebar": "#ffffff",
-    "sidebar_hover": "#eeeef4",
-    "sidebar_active": "#6558e8",
-    "sidebar_active_text": "#ffffff",
-    "table_bg": "#ffffff",
-    "table_head": "#eeeef4",
-    "table_row_alt": "#f7f7fa",
-    "table_select": "#6558e8",
-    "input_bg": "#ffffff",
-    "radius": 16,
-    "radius_sm": 10,
-    "chart": ["#6558e8", "#0891b2", "#7c3aed", "#047857", "#e11d48", "#b45309"],
-    "violet": "#7c3aed",
-    "on_surface": "#16161d",
+    "surface_alt": "#f1f1f5",
+    "surface_hover": "#e8e8ee",
+    "border": "#e1e1e8",
+    "border_forte": "#cfcfd9",
+    "text": "#121217",
+    "muted": "#6b6b78",
+    "subtle": "#a0a0ad",
+    "accent": "#0fa968",
+    "accent_hover": "#0c9159",
+    "accent_suave": "#e2f6ec",
     "on_accent": "#ffffff",
+    "magenta": "#e0287a",
+    "violet": "#6a55f0",
+    "amber": "#d98a00",
+    "cyan": "#0a8fb3",
+    "danger": "#e5354a",
+    "danger_hover": "#c92a3e",
+    "danger_suave": "#fde8eb",
+    "warning": "#d98a00",
+    "input_bg": "#f7f7fa",
+    "table_alt": "#f8f8fb",
+    "table_select": "#dcf3e7",
+    "sombra": "#c9c9d3",
+    "seg_sel": "#ffffff",
 }
 
-# Todos os módulos importam esta mesma instância por referência, pelo que as
-# alterações feitas em set_tema() são vistas automaticamente em toda a UI.
-TEMA = dict(_TEMA_ESCURO)
+RAIO = 18
+RAIO_PEQ = 11
 
-CORES = {}
-
-_MODO = "dark"
-
-
-def _sincronizar_cores():
-    CORES.clear()
-    CORES.update({
-        "sidebar": TEMA["sidebar"],
-        "sidebar_hover": TEMA["sidebar_hover"],
-        "sidebar_active": TEMA["sidebar_active"],
-        "accent": TEMA["accent"],
-        "card": TEMA["surface"],
-        "success": TEMA["success"],
-        "warning": TEMA["warning"],
-        "danger": TEMA["danger"],
-    })
+# todos os ficheiros importam este mesmo dicionário, por isso basta
+# alterá-lo aqui e reconstruir a interface para mudar de tema
+TEMA = {}
+_modo = "dark"
 
 
 def modo_tema():
-    return _MODO
+    return _modo
+
+
+def escuro():
+    return _modo == "dark"
 
 
 def set_tema(modo):
-    """Aplica o tema pedido (mutando TEMA/CORES in place) e devolve o modo."""
-    global _MODO
+    global _modo
 
-    claro = modo == "light"
-    fonte = _TEMA_CLARO if claro else _TEMA_ESCURO
+    _modo = "light" if modo == "light" else "dark"
 
     TEMA.clear()
-    TEMA.update(fonte)
-    _MODO = "light" if claro else "dark"
-    _sincronizar_cores()
+    TEMA.update(_CLARO if _modo == "light" else _ESCURO)
+    TEMA["chart"] = [TEMA["accent"], TEMA["magenta"], TEMA["violet"], TEMA["amber"], TEMA["cyan"]]
 
-    ctk.set_appearance_mode("light" if claro else "dark")
-    return _MODO
+    ctk.set_appearance_mode(_modo)
+    guardar_preferencia("tema", _modo)
+    return _modo
 
 
 def alternar_tema():
-    return set_tema("light" if _MODO == "dark" else "dark")
+    return set_tema("light" if _modo == "dark" else "dark")
 
 
-_sincronizar_cores()
+def misturar(cor1, cor2, quanto):
+    """Mistura duas cores hex (quanto=0 -> cor1, 1 -> cor2)."""
+    a = [int(cor1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(cor2[i:i + 2], 16) for i in (1, 3, 5)]
+    c = [round(x + (y - x) * quanto) for x, y in zip(a, b)]
+    return "#%02x%02x%02x" % tuple(c)
+
+
+set_tema(ler_preferencia("tema", "dark"))
